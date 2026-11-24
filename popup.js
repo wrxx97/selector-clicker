@@ -1,17 +1,20 @@
 const DEFAULTS = {
   enabled: false,
   selectors: [],
-  interval: 1500,
   cooldown: 8000
 };
 
 const elements = {
   enabled: document.querySelector("#enabled"),
   selectors: document.querySelector("#selectors"),
-  interval: document.querySelector("#interval"),
+  advanced: document.querySelector("#advanced"),
   cooldown: document.querySelector("#cooldown"),
   save: document.querySelector("#save"),
   scanNow: document.querySelector("#scan-now"),
+  pickElement: document.querySelector("#pick-element"),
+  pickerStatus: document.querySelector("#picker-status"),
+  siteRules: document.querySelector("#site-rules"),
+  siteRuleList: document.querySelector("#site-rule-list"),
   validation: document.querySelector("#validation"),
   siteName: document.querySelector("#site-name"),
   status: document.querySelector("#status"),
@@ -20,6 +23,7 @@ const elements = {
 };
 
 let activeTab;
+let activeHostname;
 
 function parseSelectors(value) {
   return [...new Set(value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))];
@@ -47,6 +51,7 @@ async function saveSettings() {
   const selectors = parseSelectors(elements.selectors.value);
   const invalid = validateSelectors(selectors);
   if (invalid.length) {
+    elements.advanced.open = true;
     elements.validation.textContent = `无效选择器：${invalid.slice(0, 2).join("；")}`;
     return false;
   }
@@ -54,11 +59,9 @@ async function saveSettings() {
   const settings = {
     enabled: elements.enabled.checked,
     selectors,
-    interval: Math.min(60000, Math.max(250, Number(elements.interval.value) || DEFAULTS.interval)),
     cooldown: Math.min(300000, Math.max(1000, Number(elements.cooldown.value) || DEFAULTS.cooldown))
   };
   await chrome.storage.sync.set(settings);
-  elements.interval.value = settings.interval;
   elements.cooldown.value = settings.cooldown;
   elements.validation.textContent = "";
   updateStatus(settings.enabled);
@@ -71,13 +74,51 @@ async function getCurrentTab() {
 }
 
 async function refreshPageStatus() {
-  if (!activeTab?.id) return;
+  if (activeTab?.id == null) return;
   try {
     const response = await chrome.tabs.sendMessage(activeTab.id, { type: "get-status" });
     updateStatus(response.enabled, response.totalClicks);
+    elements.pickElement.disabled = !activeHostname;
+    if (!activeHostname) elements.pickerStatus.textContent = "可在普通网页上选取元素。";
   } catch {
     elements.status.textContent = "此页面不支持运行扩展";
     elements.scanNow.disabled = true;
+    elements.pickerStatus.textContent = "此页面无法选取元素。";
+  }
+}
+
+function renderSiteRules(selectors) {
+  const items = selectors.map((selector) => {
+    const item = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = selector;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary";
+    remove.textContent = "移除";
+    remove.setAttribute("aria-label", `移除规则 ${selector}`);
+    remove.addEventListener("click", () => removeSiteRule(selector, remove));
+    item.append(code, remove);
+    return item;
+  });
+  elements.siteRuleList.replaceChildren(...items);
+  elements.siteRules.hidden = !items.length;
+}
+
+async function removeSiteRule(selector, button) {
+  button.disabled = true;
+  elements.pickerStatus.textContent = "";
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "remove-site-selector",
+      hostname: activeHostname,
+      selector
+    });
+    if (!response?.ok) throw new Error("Could not remove site rule");
+    renderSiteRules(response.selectors);
+  } catch {
+    elements.pickerStatus.textContent = "移除失败，请重试。";
+    button.disabled = false;
   }
 }
 
@@ -87,20 +128,34 @@ async function initialize() {
     getCurrentTab()
   ]);
   activeTab = tab;
+  activeHostname = getSiteHostname(tab?.url);
   elements.enabled.checked = settings.enabled;
   elements.selectors.value = settings.selectors.join("\n");
-  elements.interval.value = settings.interval;
+  elements.advanced.open = Boolean(settings.selectors.length);
   elements.cooldown.value = settings.cooldown;
-
-  try {
-    elements.siteName.textContent = new URL(tab.url).hostname;
-  } catch {
-    elements.siteName.textContent = "当前页面";
-  }
+  elements.siteName.textContent = activeHostname || "当前页面";
 
   updateStatus(settings.enabled);
+  if (activeHostname) {
+    const key = siteSelectorsKey(activeHostname);
+    const { [key]: selectors } = await chrome.storage.sync.get({ [key]: [] });
+    renderSiteRules(selectors);
+  }
   await refreshPageStatus();
 }
+
+elements.pickElement.addEventListener("click", async () => {
+  elements.pickElement.disabled = true;
+  elements.pickerStatus.textContent = "";
+  try {
+    const response = await chrome.tabs.sendMessage(activeTab.id, { type: "start-picker" });
+    if (!response?.ok) throw new Error("Could not start picker");
+    window.close();
+  } catch {
+    elements.pickerStatus.textContent = "无法进入选取模式，请刷新网页后重试。";
+    elements.pickElement.disabled = false;
+  }
+});
 
 elements.save.addEventListener("click", saveSettings);
 elements.enabled.addEventListener("change", saveSettings);

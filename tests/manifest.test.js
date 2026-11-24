@@ -14,7 +14,7 @@ test("declares a valid Manifest V3 content script entry point", () => {
   assert.deepEqual(manifest.content_scripts, [
     {
       matches: ["<all_urls>"],
-      js: ["content.js"],
+      js: ["site-rules.js", "picker.js", "content.js"],
       run_at: "document_idle"
     }
   ]);

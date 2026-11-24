@@ -1,16 +1,21 @@
 (() => {
+  const hostname = getSiteHostname(location.href);
+  const siteKey = hostname ? siteSelectorsKey(hostname) : null;
   const DEFAULTS = {
     enabled: false,
     selectors: [],
-    interval: 1500,
-    cooldown: 8000
+    cooldown: 8000,
+    ...(siteKey ? { [siteKey]: [] } : {})
   };
 
   let config = { ...DEFAULTS };
-  let intervalId = null;
   let mutationTimer = null;
   let totalClicks = 0;
   const lastClicks = new WeakMap();
+  const picker = createElementPicker(async (selector) => {
+    const response = await chrome.runtime.sendMessage({ type: "save-site-selector", selector });
+    if (!response?.ok) throw new Error("Could not save site rule");
+  }, scheduleScan);
 
   function isVisible(element) {
     const style = window.getComputedStyle(element);
@@ -46,12 +51,12 @@
     return true;
   }
 
-  function scan() {
-    if (!config.enabled || !config.selectors.length) return;
-
-    for (const selector of config.selectors) {
+  function scanSelectors(selectors, uniqueOnly = false) {
+    for (const selector of selectors) {
       try {
-        for (const element of document.querySelectorAll(selector)) {
+        const matches = document.querySelectorAll(selector);
+        if (uniqueOnly && matches.length !== 1) continue;
+        for (const element of matches) {
           clickElement(element, selector);
         }
       } catch {
@@ -60,38 +65,48 @@
     }
   }
 
+  function scan() {
+    if (!config.enabled || picker.active) return;
+    scanSelectors(config.selectors);
+    if (siteKey) scanSelectors(config[siteKey], true);
+  }
+
   function scheduleScan() {
-    window.clearTimeout(mutationTimer);
-    mutationTimer = window.setTimeout(scan, 100);
+    if (!config.enabled || picker.active || mutationTimer !== null) return;
+    mutationTimer = window.setTimeout(() => {
+      mutationTimer = null;
+      scan();
+    }, 100);
   }
 
   function applyConfig(nextConfig) {
     config = {
       ...DEFAULTS,
       ...nextConfig,
-      interval: Math.max(250, Number(nextConfig.interval) || DEFAULTS.interval),
       cooldown: Math.max(1000, Number(nextConfig.cooldown) || DEFAULTS.cooldown)
     };
 
-    window.clearInterval(intervalId);
-    intervalId = null;
-    if (config.enabled) {
+    window.clearTimeout(mutationTimer);
+    mutationTimer = null;
+    if (config.enabled && (config.selectors.length || config[siteKey]?.length)) {
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
       scan();
-      intervalId = window.setInterval(scan, config.interval);
     } else {
-      chrome.runtime.sendMessage({ type: "reset-badge" });
+      observer.disconnect();
+      if (!config.enabled) chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 
   const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 
   chrome.storage.sync.get(DEFAULTS).then(applyConfig);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "sync") return;
+    const changedKeys = Object.keys(DEFAULTS).filter((key) => Object.hasOwn(changes, key));
+    if (!changedKeys.length) return;
     const changedConfig = { ...config };
-    for (const [key, change] of Object.entries(changes)) {
-      changedConfig[key] = change.newValue;
+    for (const key of changedKeys) {
+      changedConfig[key] = changes[key].newValue ?? DEFAULTS[key];
     }
     applyConfig(changedConfig);
   });
@@ -107,6 +122,18 @@
     if (message.type === "scan-now") {
       scan();
       sendResponse({ totalClicks });
+    }
+    if (message.type === "start-picker") {
+      if (!hostname) {
+        sendResponse({ ok: false });
+        return;
+      }
+      try {
+        picker.start(hostname);
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false });
+      }
     }
   });
 })();

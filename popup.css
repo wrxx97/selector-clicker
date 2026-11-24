@@ -87,17 +87,80 @@ input[type="number"]:focus {
 }
 
 .hint {
-  margin: 6px 0 15px;
+  margin: 6px 0 0;
   line-height: 1.45;
 }
 
-.settings {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.settings label {
+.pick-element {
+  width: 100%;
+}
+
+.picker-status {
+  margin-top: 6px;
+  color: #5e6861;
+  font-size: 12px;
+}
+
+.picker-status:empty {
+  display: none;
+}
+
+.site-rules {
+  margin-top: 12px;
+}
+
+.site-rules h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.site-rules ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-rules li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.site-rules code {
+  overflow-wrap: anywhere;
+}
+
+.site-rules button {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.advanced {
+  margin: 14px 0;
+  color: #344039;
+  font-size: 13px;
+}
+
+.advanced summary {
+  cursor: pointer;
+}
+
+.cooldown-setting {
+  max-width: 157px;
   font-size: 12px;
 }
 

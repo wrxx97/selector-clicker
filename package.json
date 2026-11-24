@@ -4,6 +4,6 @@
   "private": true,
   "description": "Tests for the Selector Clicker browser extension.",
   "scripts": {
-    "test": "node --test tests/content.test.js tests/manifest.test.js"
+    "test": "node --test"
   }
 }

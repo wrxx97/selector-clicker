@@ -14,7 +14,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["site-rules.js", "picker.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

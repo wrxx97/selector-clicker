@@ -19,31 +19,35 @@
         </label>
       </header>
 
-      <label for="selectors">CSS 选择器</label>
-      <textarea
-        id="selectors"
-        rows="7"
-        spellcheck="false"
-        placeholder=".ad-close&#10;[aria-label='Close ad']&#10;#popup .close"
-      ></textarea>
-      <p class="hint">每行一个选择器。匹配到可见、未禁用的元素时会点击。</p>
+      <button id="pick-element" class="pick-element" type="button" disabled>在页面上选取元素</button>
+      <p id="picker-status" class="picker-status" role="status"></p>
+      <section id="site-rules" class="site-rules" hidden>
+        <h2>当前网站的规则</h2>
+        <ul id="site-rule-list"></ul>
+      </section>
 
-      <div class="settings">
-        <label for="interval">
-          扫描间隔
-          <span class="input-wrap"><input id="interval" type="number" min="250" max="60000" step="250" /> ms</span>
-        </label>
-        <label for="cooldown">
-          同一元素冷却
-          <span class="input-wrap"><input id="cooldown" type="number" min="1000" max="300000" step="1000" /> ms</span>
-        </label>
-      </div>
+      <details id="advanced" class="advanced">
+        <summary>全局选择器（高级）</summary>
+        <label class="visually-hidden" for="selectors">全局 CSS 选择器</label>
+        <textarea
+          id="selectors"
+          rows="5"
+          spellcheck="false"
+          placeholder=".ad-close&#10;[aria-label='Close ad']&#10;#popup .close"
+        ></textarea>
+        <p class="hint">每行一个 CSS 选择器，应用于所有网站。</p>
+      </details>
+
+      <label for="cooldown" class="cooldown-setting">
+        同一元素冷却
+        <span class="input-wrap"><input id="cooldown" type="number" min="1000" max="300000" step="1000" /> ms</span>
+      </label>
 
       <p id="validation" class="validation" role="alert"></p>
 
       <div class="actions">
         <button id="scan-now" class="secondary" type="button" title="立即在当前页面扫描一次">立即扫描</button>
-        <button id="save" type="button">保存设置</button>
+        <button id="save" class="secondary" type="button">保存设置</button>
       </div>
 
       <footer>
@@ -52,6 +56,7 @@
         <span id="click-count"></span>
       </footer>
     </main>
+    <script src="site-rules.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
