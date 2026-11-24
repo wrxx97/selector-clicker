@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Selector Clicker",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyAaTOT8Q0ytoMEGLYMzUsIttJ+g9quP5EsnPnomLRMDVVvDh1ei/dj4pxPHMe+8w4aKxjC5R9v/gjS5+HzzrEZ8M3BYcwwslUXM3Qzw/ODPnsNBXInQmE5lsYnPo7tdmkq464uzO6SMSHEBC6saZBxL0Q5yg6Qr5LUGgYy5XY6Zhr6PsG82fJdnBzlS/rQP7CcAMMr7TIxQ5ooir+IWml2wP7EO1rDZbh1OrWOH+yKytueIDTvnVQ8SVJFpiVBwLNQXywu1/7f/Hx7KVxd8wtwPIqtLF6AZw82oHiAiYmcztxMGnqPk6qq//ZBCmkAYTeyEtVmvZoQE8XLXaRIpZ7QIDAQAB",
   "version": "1.0.0",
   "description": "Pick page elements to click automatically on each site.",
   "permissions": ["storage", "tabs"],
