@@ -8,53 +8,53 @@
   </head>
   <body>
     <main>
-      <header>
-        <div>
+      <header class="masthead">
+        <span class="brand-mark" aria-hidden="true"><span class="target"></span></span>
+        <div class="brand-copy">
           <h1>元素自动点击</h1>
-          <p id="site-name">正在读取当前页面</p>
+          <p class="automation-status"><span id="status-dot" aria-hidden="true"></span><span id="status">已停用</span></p>
         </div>
         <label class="switch" title="启用或停用自动点击">
-          <input id="enabled" type="checkbox" />
-          <span class="slider"></span>
+          <input id="enabled" type="checkbox" role="switch" aria-label="自动点击" />
+          <span class="slider" aria-hidden="true"></span>
         </label>
       </header>
 
-      <button id="pick-element" class="pick-element" type="button" disabled>在页面上选取元素</button>
-      <p id="picker-status" class="picker-status" role="status"></p>
-      <section id="site-rules" class="site-rules" hidden>
-        <h2>当前网站的规则</h2>
-        <ul id="site-rule-list"></ul>
+      <section class="card site-card" aria-labelledby="site-name">
+        <div class="site-heading">
+          <div class="site-heading-copy">
+            <p class="section-label">当前网站</p>
+            <h2 id="site-name">正在读取…</h2>
+          </div>
+          <span id="rule-count" class="rule-count" hidden></span>
+        </div>
+        <button id="pick-element" class="pick-element" type="button" disabled>
+          <span class="target" aria-hidden="true"></span>
+          在页面上选取元素
+        </button>
+        <p id="picker-status" class="feedback" role="status"></p>
+        <div id="site-rules" class="site-rules" hidden>
+          <ul id="site-rule-list" aria-label="站点规则"></ul>
+        </div>
+        <p id="empty-rules" class="empty-rules" hidden>选取后，规则只在此网站生效。</p>
       </section>
 
-      <details id="advanced" class="advanced">
-        <summary>全局选择器（高级）</summary>
-        <label class="visually-hidden" for="selectors">全局 CSS 选择器</label>
-        <textarea
-          id="selectors"
-          rows="5"
-          spellcheck="false"
-          placeholder=".ad-close&#10;[aria-label='Close ad']&#10;#popup .close"
-        ></textarea>
-        <p class="hint">每行一个 CSS 选择器，应用于所有网站。</p>
-      </details>
+      <section class="card settings-card" aria-label="点击设置">
+        <div class="setting-row">
+          <label for="cooldown">同一元素冷却</label>
+          <span class="number-field">
+            <input id="cooldown" type="number" min="1000" max="300000" step="1000" aria-describedby="cooldown-unit" />
+            <span id="cooldown-unit">ms</span>
+          </span>
+        </div>
+        <div class="actions">
+          <button id="scan-now" class="button-outline" type="button" title="立即在当前页面扫描一次" disabled>立即扫描</button>
+          <button id="save" class="button-tinted" type="button">保存设置</button>
+        </div>
+        <p id="settings-status" class="feedback" role="status"></p>
+      </section>
 
-      <label for="cooldown" class="cooldown-setting">
-        同一元素冷却
-        <span class="input-wrap"><input id="cooldown" type="number" min="1000" max="300000" step="1000" /> ms</span>
-      </label>
-
-      <p id="validation" class="validation" role="alert"></p>
-
-      <div class="actions">
-        <button id="scan-now" class="secondary" type="button" title="立即在当前页面扫描一次">立即扫描</button>
-        <button id="save" class="secondary" type="button">保存设置</button>
-      </div>
-
-      <footer>
-        <span id="status-dot" aria-hidden="true"></span>
-        <span id="status">尚未启用</span>
-        <span id="click-count"></span>
-      </footer>
+      <footer id="click-count" class="page-stat" hidden></footer>
     </main>
     <script src="site-rules.js"></script>
     <script src="popup.js"></script>

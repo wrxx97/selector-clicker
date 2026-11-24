@@ -3,7 +3,6 @@
   const siteKey = hostname ? siteSelectorsKey(hostname) : null;
   const DEFAULTS = {
     enabled: false,
-    selectors: [],
     cooldown: 8000,
     ...(siteKey ? { [siteKey]: [] } : {})
   };
@@ -51,28 +50,21 @@
     return true;
   }
 
-  function scanSelectors(selectors, uniqueOnly = false) {
-    for (const selector of selectors) {
+  function scan() {
+    if (!config.enabled || !siteKey || picker.active) return;
+
+    for (const selector of config[siteKey]) {
       try {
         const matches = document.querySelectorAll(selector);
-        if (uniqueOnly && matches.length !== 1) continue;
-        for (const element of matches) {
-          clickElement(element, selector);
-        }
+        if (matches.length === 1) clickElement(matches[0], selector);
       } catch {
-        // Invalid selectors are shown in the extension popup and skipped here.
+        // Skip malformed stored rules and continue checking the site.
       }
     }
   }
 
-  function scan() {
-    if (!config.enabled || picker.active) return;
-    scanSelectors(config.selectors);
-    if (siteKey) scanSelectors(config[siteKey], true);
-  }
-
   function scheduleScan() {
-    if (!config.enabled || picker.active || mutationTimer !== null) return;
+    if (!config.enabled || !config[siteKey]?.length || picker.active || mutationTimer !== null) return;
     mutationTimer = window.setTimeout(() => {
       mutationTimer = null;
       scan();
@@ -88,7 +80,7 @@
 
     window.clearTimeout(mutationTimer);
     mutationTimer = null;
-    if (config.enabled && (config.selectors.length || config[siteKey]?.length)) {
+    if (config.enabled && config[siteKey]?.length) {
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
       scan();
     } else {
@@ -115,8 +107,7 @@
     if (message.type === "get-status") {
       sendResponse({
         enabled: config.enabled,
-        totalClicks,
-        selectors: config.selectors
+        totalClicks
       });
     }
     if (message.type === "scan-now") {

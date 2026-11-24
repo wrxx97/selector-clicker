@@ -51,48 +51,62 @@ const PICKER_STYLES = `
   .outline {
     position: absolute;
     box-sizing: border-box;
-    border: 2px solid #2b9a58;
-    border-radius: 5px;
-    background: rgb(54 188 109 / 14%);
-    box-shadow: 0 0 0 1px #fff;
+    border: 2px solid #347fc9;
+    border-radius: 6px;
+    background: rgb(103 177 245 / 20%);
+    box-shadow: 0 0 0 1px #f0f8ff;
   }
   .panel {
     position: absolute;
-    inset: auto auto 16px 16px;
+    inset: auto auto 20px 20px;
     box-sizing: border-box;
     width: max-content;
-    max-width: min(380px, calc(100% - 32px));
-    padding: 14px 16px;
-    border: 1px solid #becdc1;
-    border-radius: 10px;
-    background: #f5f7f4;
-    color: #1c2820;
-    box-shadow: 0 4px 20px rgb(28 40 32 / 25%);
+    max-width: min(390px, calc(100% - 40px));
+    padding: 15px 16px;
+    border: 1px solid #d6e4f4;
+    border-radius: 14px;
+    background: #fff;
+    color: #172e4b;
+    box-shadow: 0 6px 28px rgb(22 55 96 / 23%);
     font: 14px/1.5 "Microsoft YaHei UI", "Segoe UI", sans-serif;
     overflow-wrap: anywhere;
   }
   .panel.confirming { pointer-events: auto; }
-  .title { margin: 0 0 4px; font-weight: 650; }
-  .status { margin: 0; }
+  .title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-weight: 700; }
+  .title::before {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #347fc9;
+    content: "";
+  }
+  .status { margin: 0; color: #4e647f; }
   .selector {
     display: block;
-    margin-top: 8px;
-    padding: 6px 8px;
-    border-radius: 5px;
-    background: #e6ede6;
+    margin-top: 10px;
+    padding: 7px 9px;
+    border-radius: 7px;
+    background: #eff6ff;
+    color: #234e7b;
     font: 12px/1.45 ui-monospace, monospace;
   }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button {
-    padding: 6px 9px;
-    border: 1px solid #b8c2ba;
-    border-radius: 5px;
+    padding: 6px 10px;
+    border: 1px solid #d6e4f4;
+    border-radius: 8px;
     background: #fff;
-    color: #344039;
+    color: #172e4b;
     font: inherit;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
   }
-  .save { border-color: #287142; background: #287142; color: #fff; }
+  button:hover:enabled { background: #eff6ff; }
+  button:focus-visible { outline: 2px solid #296fb1; outline-offset: 2px; }
+  .save { margin-left: auto; border-color: #225f9d; background: #225f9d; color: #fff; }
+  .save:hover:enabled { border-color: #194d82; background: #194d82; }
   button:disabled { opacity: .55; cursor: default; }
 `;
 
@@ -104,6 +118,7 @@ function createElementPicker(saveRule, resumeScan) {
     session?.controller.abort();
 
     const host = document.createElement("selector-clicker-picker");
+    host.lang = "zh-CN";
     const shadow = host.attachShadow({ mode: "closed" });
     const styles = new CSSStyleSheet();
     styles.replaceSync(PICKER_STYLES);
@@ -121,7 +136,7 @@ function createElementPicker(saveRule, resumeScan) {
     const surface = createNode("div", "surface");
     const outline = createNode("div", "outline");
     const panel = createNode("section", "panel");
-    const title = createNode("p", "title", "选取要自动点击的元素");
+    const title = createNode("p", "title");
     const status = createNode("p", "status");
     status.setAttribute("role", "status");
     const preview = createNode("code", "selector");
@@ -157,6 +172,7 @@ function createElementPicker(saveRule, resumeScan) {
       preview.hidden = true;
       actions.hidden = true;
       panel.classList.remove("confirming");
+      title.textContent = "选取要自动点击的元素";
       status.textContent = "移动鼠标高亮元素，单击选取。按 Esc 取消。";
       updateOutline();
     }
@@ -211,6 +227,7 @@ function createElementPicker(saveRule, resumeScan) {
       preview.hidden = false;
       actions.hidden = false;
       panel.classList.add("confirming");
+      title.textContent = "确认站点规则";
       status.textContent = `当前页面匹配 ${count} 个元素。仅在 ${hostname} 生效。`;
       updateOutline();
       save.focus({ preventScroll: true });

@@ -164,7 +164,7 @@ test("clicks visible matching elements after the configuration loads", async () 
   const app = await startContentScript({
     config: {
       enabled: true,
-      selectors: [".ad-close"],
+      [siteKey]: [".ad-close"],
       cooldown: 8000
     },
     elementsBySelector: { ".ad-close": [closeButton] }
@@ -182,7 +182,7 @@ test("clicks visible matching elements after the configuration loads", async () 
 test("scans when an existing matching element becomes visible after an attribute change", async () => {
   const closeButton = createElement({ display: "none" });
   const app = await startContentScript({
-    config: { enabled: true, selectors: [".ad-close"] },
+    config: { enabled: true, [siteKey]: [".ad-close"] },
     elementsBySelector: { ".ad-close": [closeButton] }
   });
 
@@ -200,7 +200,7 @@ test("scans after insertion and batches mutations without delaying the pending s
   const matches = [];
   const closeButton = createElement();
   const app = await startContentScript({
-    config: { enabled: true, selectors: [".ad-close"] },
+    config: { enabled: true, [siteKey]: [".ad-close"] },
     elementsBySelector: { ".ad-close": matches }
   });
 
@@ -223,10 +223,14 @@ test("does not click hidden, disabled, or detached matching elements", async () 
   const app = await startContentScript({
     config: {
       enabled: true,
-      selectors: [".ad-close"],
+      [siteKey]: [".hidden", ".disabled", ".detached"],
       cooldown: 8000
     },
-    elementsBySelector: { ".ad-close": [hiddenButton, disabledButton, detachedButton] }
+    elementsBySelector: {
+      ".hidden": [hiddenButton],
+      ".disabled": [disabledButton],
+      ".detached": [detachedButton]
+    }
   });
 
   assert.equal(hiddenButton.state.clicks, 0);
@@ -254,6 +258,21 @@ test("observes and clicks a site rule only on its saved hostname", async () => {
   assert.equal(app.observer.options.childList, true);
   assert.equal(differentSite.state.clicks, 0);
   assert.equal(otherApp.observer.options, undefined);
+});
+
+test("ignores legacy global rules on both automatic and manual scans", async () => {
+  const legacyButton = createElement();
+  const siteButton = createElement();
+  const app = await startContentScript({
+    config: { enabled: true, selectors: [".legacy-close"], [siteKey]: [".site-close"] },
+    elementsBySelector: { ".legacy-close": [legacyButton], ".site-close": [siteButton] }
+  });
+
+  assert.equal(siteButton.state.clicks, 1);
+  assert.equal(legacyButton.state.clicks, 0);
+  app.storageListeners[0]({ selectors: { newValue: [".legacy-close"] } }, "sync");
+  sendMessage(app.runtimeListeners[0], { type: "scan-now" });
+  assert.equal(legacyButton.state.clicks, 0);
 });
 
 test("skips an ambiguous site rule until it has exactly one match", async () => {
@@ -293,7 +312,7 @@ test("respects the cooldown when an immediate scan is requested twice", async ()
   const app = await startContentScript({
     config: {
       enabled: true,
-      selectors: [".ad-close"],
+      [siteKey]: [".ad-close"],
       cooldown: 8000
     },
     elementsBySelector: { ".ad-close": [closeButton] }
@@ -310,7 +329,7 @@ test("keeps scanning valid selectors when another selector is invalid", async ()
   await startContentScript({
     config: {
       enabled: true,
-      selectors: ["[", ".ad-close"],
+      [siteKey]: ["[", ".ad-close"],
       cooldown: 8000
     },
     invalidSelectors: ["["],
@@ -325,7 +344,7 @@ test("stops clicking after the extension is disabled through storage", async () 
   const app = await startContentScript({
     config: {
       enabled: true,
-      selectors: [".ad-close"],
+      [siteKey]: [".ad-close"],
       cooldown: 8000
     },
     elementsBySelector: { ".ad-close": [closeButton] }

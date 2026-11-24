@@ -2,7 +2,6 @@ importScripts("site-rules.js");
 
 const DEFAULTS = {
   enabled: false,
-  selectors: [],
   cooldown: 8000
 };
 

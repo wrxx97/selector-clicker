@@ -1,13 +1,10 @@
 const DEFAULTS = {
   enabled: false,
-  selectors: [],
   cooldown: 8000
 };
 
 const elements = {
   enabled: document.querySelector("#enabled"),
-  selectors: document.querySelector("#selectors"),
-  advanced: document.querySelector("#advanced"),
   cooldown: document.querySelector("#cooldown"),
   save: document.querySelector("#save"),
   scanNow: document.querySelector("#scan-now"),
@@ -15,7 +12,9 @@ const elements = {
   pickerStatus: document.querySelector("#picker-status"),
   siteRules: document.querySelector("#site-rules"),
   siteRuleList: document.querySelector("#site-rule-list"),
-  validation: document.querySelector("#validation"),
+  ruleCount: document.querySelector("#rule-count"),
+  emptyRules: document.querySelector("#empty-rules"),
+  settingsStatus: document.querySelector("#settings-status"),
   siteName: document.querySelector("#site-name"),
   status: document.querySelector("#status"),
   statusDot: document.querySelector("#status-dot"),
@@ -24,46 +23,34 @@ const elements = {
 
 let activeTab;
 let activeHostname;
+let pageClicks;
 
-function parseSelectors(value) {
-  return [...new Set(value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))];
+function setFeedback(element, text, error = false) {
+  element.textContent = text;
+  element.classList.toggle("error", error);
 }
 
-function validateSelectors(selectors) {
-  const invalid = [];
-  for (const selector of selectors) {
-    try {
-      document.querySelector(selector);
-    } catch {
-      invalid.push(selector);
-    }
-  }
-  return invalid;
-}
-
-function updateStatus(enabled, totalClicks = 0) {
-  elements.status.textContent = enabled ? "自动点击已启用" : "自动点击已停用";
+function updateStatus(enabled, totalClicks = pageClicks) {
+  pageClicks = totalClicks;
+  elements.status.textContent = enabled ? "已启用" : "已停用";
   elements.statusDot.classList.toggle("active", enabled);
-  elements.clickCount.textContent = totalClicks ? `本页已点击 ${totalClicks} 次` : "";
+  elements.clickCount.hidden = totalClicks == null;
+  elements.clickCount.textContent = totalClicks == null ? "" : `本页已点击 ${totalClicks} 次`;
 }
 
-async function saveSettings() {
-  const selectors = parseSelectors(elements.selectors.value);
-  const invalid = validateSelectors(selectors);
-  if (invalid.length) {
-    elements.advanced.open = true;
-    elements.validation.textContent = `无效选择器：${invalid.slice(0, 2).join("；")}`;
-    return false;
-  }
-
+async function saveSettings(showFeedback = false) {
   const settings = {
     enabled: elements.enabled.checked,
-    selectors,
     cooldown: Math.min(300000, Math.max(1000, Number(elements.cooldown.value) || DEFAULTS.cooldown))
   };
-  await chrome.storage.sync.set(settings);
+  try {
+    await chrome.storage.sync.set(settings);
+  } catch {
+    setFeedback(elements.settingsStatus, "保存设置失败，请重试。", true);
+    return false;
+  }
   elements.cooldown.value = settings.cooldown;
-  elements.validation.textContent = "";
+  setFeedback(elements.settingsStatus, showFeedback ? "设置已保存。" : "");
   updateStatus(settings.enabled);
   return true;
 }
@@ -74,16 +61,18 @@ async function getCurrentTab() {
 }
 
 async function refreshPageStatus() {
-  if (activeTab?.id == null) return;
+  if (activeTab?.id == null || !activeHostname) {
+    setFeedback(elements.pickerStatus, "请在普通网页上选取元素。");
+    return;
+  }
   try {
     const response = await chrome.tabs.sendMessage(activeTab.id, { type: "get-status" });
     updateStatus(response.enabled, response.totalClicks);
-    elements.pickElement.disabled = !activeHostname;
-    if (!activeHostname) elements.pickerStatus.textContent = "可在普通网页上选取元素。";
+    elements.pickElement.disabled = false;
+    elements.scanNow.disabled = false;
   } catch {
-    elements.status.textContent = "此页面不支持运行扩展";
-    elements.scanNow.disabled = true;
-    elements.pickerStatus.textContent = "此页面无法选取元素。";
+    elements.emptyRules.hidden = true;
+    setFeedback(elements.pickerStatus, "无法连接当前网页。重新加载扩展后，请刷新网页。", true);
   }
 }
 
@@ -94,7 +83,7 @@ function renderSiteRules(selectors) {
     code.textContent = selector;
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "secondary";
+    remove.className = "remove-rule";
     remove.textContent = "移除";
     remove.setAttribute("aria-label", `移除规则 ${selector}`);
     remove.addEventListener("click", () => removeSiteRule(selector, remove));
@@ -103,11 +92,14 @@ function renderSiteRules(selectors) {
   });
   elements.siteRuleList.replaceChildren(...items);
   elements.siteRules.hidden = !items.length;
+  elements.emptyRules.hidden = items.length > 0;
+  elements.ruleCount.hidden = false;
+  elements.ruleCount.textContent = `${items.length} 条规则`;
 }
 
 async function removeSiteRule(selector, button) {
   button.disabled = true;
-  elements.pickerStatus.textContent = "";
+  setFeedback(elements.pickerStatus, "");
   try {
     const response = await chrome.runtime.sendMessage({
       type: "remove-site-selector",
@@ -117,7 +109,7 @@ async function removeSiteRule(selector, button) {
     if (!response?.ok) throw new Error("Could not remove site rule");
     renderSiteRules(response.selectors);
   } catch {
-    elements.pickerStatus.textContent = "移除失败，请重试。";
+    setFeedback(elements.pickerStatus, "移除失败，请重试。", true);
     button.disabled = false;
   }
 }
@@ -130,10 +122,9 @@ async function initialize() {
   activeTab = tab;
   activeHostname = getSiteHostname(tab?.url);
   elements.enabled.checked = settings.enabled;
-  elements.selectors.value = settings.selectors.join("\n");
-  elements.advanced.open = Boolean(settings.selectors.length);
   elements.cooldown.value = settings.cooldown;
-  elements.siteName.textContent = activeHostname || "当前页面";
+  elements.siteName.textContent = activeHostname || "当前页面不可用";
+  elements.siteName.title = activeHostname;
 
   updateStatus(settings.enabled);
   if (activeHostname) {
@@ -146,27 +137,31 @@ async function initialize() {
 
 elements.pickElement.addEventListener("click", async () => {
   elements.pickElement.disabled = true;
-  elements.pickerStatus.textContent = "";
+  setFeedback(elements.pickerStatus, "");
   try {
     const response = await chrome.tabs.sendMessage(activeTab.id, { type: "start-picker" });
     if (!response?.ok) throw new Error("Could not start picker");
     window.close();
   } catch {
-    elements.pickerStatus.textContent = "无法进入选取模式，请刷新网页后重试。";
+    setFeedback(elements.pickerStatus, "无法进入选取模式，请刷新网页后重试。", true);
     elements.pickElement.disabled = false;
   }
 });
 
-elements.save.addEventListener("click", saveSettings);
-elements.enabled.addEventListener("change", saveSettings);
+elements.save.addEventListener("click", () => saveSettings(true));
+elements.enabled.addEventListener("change", () => saveSettings());
 elements.scanNow.addEventListener("click", async () => {
   const isSaved = await saveSettings();
-  if (!isSaved || !activeTab?.id) return;
+  if (!isSaved || activeTab?.id == null) return;
+  if (!elements.enabled.checked) {
+    setFeedback(elements.settingsStatus, "开启自动点击后即可扫描。");
+    return;
+  }
   try {
     const response = await chrome.tabs.sendMessage(activeTab.id, { type: "scan-now" });
     updateStatus(elements.enabled.checked, response.totalClicks);
   } catch {
-    elements.status.textContent = "无法扫描此页面";
+    setFeedback(elements.settingsStatus, "无法扫描此页面。", true);
   }
 });
 
