@@ -1,5 +1,6 @@
 const SITE_SELECTORS_PREFIX = "siteSelectors:";
 const SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
+const SITE_PAUSED_PREFIX = "sitePaused:";
 const SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
 const TOTAL_CLICK_COUNT_KEY = "totalClickCount";
 const RULE_NAME_MAX_LENGTH = 80;
@@ -21,6 +22,10 @@ function siteRuleDetailsKey(hostname) {
   return SITE_RULE_DETAILS_PREFIX + hostname;
 }
 
+function sitePausedKey(hostname) {
+  return SITE_PAUSED_PREFIX + hostname;
+}
+
 function siteClickCountsKey(hostname) {
   return SITE_CLICK_COUNTS_PREFIX + hostname;
 }
@@ -38,6 +43,6 @@ function getSiteRules(stored, hostname) {
     const detail = details?.[key];
     const id = typeof detail?.id === "string" && detail.id ? detail.id : key;
     const name = typeof detail?.name === "string" ? detail.name : "";
-    return { selector, id, name };
+    return { selector, id, name, paused: detail?.paused === true };
   });
 }

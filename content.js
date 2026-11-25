@@ -2,16 +2,18 @@
   const hostname = getSiteHostname(location.href);
   const siteKey = hostname ? siteSelectorsKey(hostname) : null;
   const detailsKey = hostname ? siteRuleDetailsKey(hostname) : null;
+  const pausedKey = hostname ? sitePausedKey(hostname) : null;
   const DEFAULTS = {
     enabled: false,
     cooldown: 8000,
-    ...(siteKey ? { [siteKey]: [], [detailsKey]: {} } : {})
+    ...(siteKey ? { [siteKey]: [], [detailsKey]: {}, [pausedKey]: false } : {})
   };
 
   let config = { ...DEFAULTS };
   let mutationTimer = null;
   let totalClicks = 0;
   let ruleHighlight;
+  let siteRules = [];
   const lastClicks = new WeakMap();
   const picker = createElementPicker(async (selector, name, editing) => {
     const message = editing
@@ -58,7 +60,7 @@
   }
 
   function testRule(selector) {
-    const rule = getSiteRules(config, hostname).find((item) => item.selector === selector);
+    const rule = siteRules.find((item) => item.selector === selector);
     ruleHighlight?.cancel();
     if (!rule) return { status: "removed" };
     const { status, count, target } = inspectRule(rule.selector);
@@ -68,14 +70,20 @@
         { outline: "3px solid transparent", outlineOffset: "5px" }
       ], { duration: 2400, easing: "ease-in" });
     }
-    return { status, count };
+    const pauseStatus = config[pausedKey] ? "site-paused" : rule.paused ? "rule-paused" : status;
+    return { status: pauseStatus, count };
+  }
+
+  function automaticClickEnabled() {
+    return config.enabled && !config[pausedKey] && siteRules.some((rule) => !rule.paused);
   }
 
   function scan() {
-    if (!config.enabled || !siteKey || picker.active) return;
+    if (!automaticClickEnabled() || picker.active) return;
 
     const ruleIds = [];
-    for (const { selector, id } of getSiteRules(config, hostname)) {
+    for (const { selector, id, paused } of siteRules) {
+      if (paused) continue;
       const { status, target } = inspectRule(selector);
       if (status !== "ready") continue;
       lastClicks.set(target, Date.now());
@@ -89,28 +97,29 @@
   }
 
   function scheduleScan() {
-    if (!config.enabled || !config[siteKey]?.length || picker.active || mutationTimer !== null) return;
+    if (!automaticClickEnabled() || picker.active || mutationTimer !== null) return;
     mutationTimer = window.setTimeout(() => {
       mutationTimer = null;
       scan();
     }, 100);
   }
 
-  function applyConfig(nextConfig) {
+  function applyConfig(nextConfig, scanImmediately = true) {
     config = {
       ...DEFAULTS,
       ...nextConfig,
       cooldown: Math.max(1000, Number(nextConfig.cooldown) || DEFAULTS.cooldown)
     };
+    siteRules = getSiteRules(config, hostname);
 
     window.clearTimeout(mutationTimer);
     mutationTimer = null;
-    if (config.enabled && config[siteKey]?.length) {
+    if (automaticClickEnabled()) {
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-      scan();
+      if (scanImmediately) scan();
     } else {
       observer.disconnect();
-      if (!config.enabled) chrome.runtime.sendMessage({ type: "reset-badge" });
+      if (!config.enabled || config[pausedKey]) chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 
@@ -126,7 +135,16 @@
       changedConfig[key] = changes[key].newValue ?? DEFAULTS[key];
     }
     if (changedKeys.length === 1 && changedKeys[0] === detailsKey) {
-      config = changedConfig;
+      const pauseChanged = siteRules.some((rule) => rule.paused !==
+        (changedConfig[detailsKey]?.[ruleSelectorKey(rule.selector)]?.paused === true));
+      if (!pauseChanged) {
+        config = changedConfig;
+        siteRules = getSiteRules(config, hostname);
+        return;
+      }
+      const resumed = siteRules.some((rule) => rule.paused &&
+        changedConfig[detailsKey]?.[ruleSelectorKey(rule.selector)]?.paused !== true);
+      applyConfig(changedConfig, resumed);
       return;
     }
     applyConfig(changedConfig);
@@ -147,7 +165,7 @@
       sendResponse(testRule(message.selector));
     }
     if (message.type === "start-picker") {
-      const editing = message.selector && getSiteRules(config, hostname)
+      const editing = message.selector && siteRules
         .find((rule) => rule.selector === message.selector && rule.id === message.expectedId);
       if (!hostname || message.hostname !== hostname || (message.selector && !editing)) {
         sendResponse({ ok: false });

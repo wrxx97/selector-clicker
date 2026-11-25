@@ -37,13 +37,17 @@ function setNotice(message, error = false) {
   elements.notice.classList.toggle("is-error", error);
 }
 
-function createGroup(hostname, rules) {
+function createGroup(hostname, rules, sitePaused) {
   const group = elements.groupTemplate.content.firstElementChild.cloneNode(true);
   group.querySelector("h2").textContent = hostname;
   group.querySelector("header span").textContent = `${rules.length} 条规则`;
+  const sitePause = group.querySelector(".toggle-site-pause");
+  sitePause.textContent = sitePaused ? "恢复站点" : "暂停站点";
+  sitePause.setAttribute("aria-label", `${sitePause.textContent} ${hostname}`);
+  sitePause.addEventListener("click", () => changePause(sitePause, hostname, { paused: !sitePaused }));
   const list = group.querySelector("ul");
   for (const rule of rules) {
-    const { selector, name, id } = rule;
+    const { selector, name, id, paused } = rule;
     const row = elements.ruleTemplate.content.firstElementChild.cloneNode(true);
     row.querySelector("code").textContent = selector;
     const label = row.querySelector(".rule-name");
@@ -51,8 +55,12 @@ function createGroup(hostname, rules) {
     label.hidden = !name;
     clickCountElements.push({ hostname, id, node: row.querySelector(".rule-click-count") });
     const edit = row.querySelector(".edit-rule");
+    const pause = row.querySelector(".toggle-rule-pause");
     const remove = row.querySelector(".remove-rule");
     edit.setAttribute("aria-label", `编辑规则 ${name || selector}`);
+    pause.textContent = paused ? "恢复" : "暂停";
+    pause.setAttribute("aria-label", `${pause.textContent}规则 ${name || selector}`);
+    pause.addEventListener("click", () => changePause(pause, hostname, { selector, expectedId: id, paused: !paused }));
     remove.setAttribute("aria-label", `移除规则 ${name || selector}`);
     edit.addEventListener("click", () => openRuleDialog(hostname, rule, false));
     remove.addEventListener("click", () => openRuleDialog(hostname, rule, true));
@@ -61,18 +69,32 @@ function createGroup(hostname, rules) {
   return group;
 }
 
+async function changePause(button, hostname, options) {
+  button.disabled = true;
+  try {
+    const type = options.selector ? "set-rule-paused" : "set-site-paused";
+    const result = await chrome.runtime.sendMessage({ type, hostname, ...options });
+    if (!result?.ok) throw new Error("Pause failed");
+    setNotice(options.paused ? "已暂停自动点击。" : "已恢复自动点击。");
+  } catch {
+    setNotice("无法修改暂停状态，请重试。", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderRules() {
   if (!sites) return;
   const query = elements.search.value.trim().toLowerCase();
   const groups = [];
   clickCountElements = [];
   let ruleCount = 0;
-  for (const [hostname, rules] of sites) {
+  for (const [hostname, rules, sitePaused] of sites) {
     const matches = hostname.toLowerCase().includes(query)
       ? rules
       : rules.filter(({ selector, name }) => selector.toLowerCase().includes(query) || name.toLowerCase().includes(query));
     if (!matches.length) continue;
-    groups.push(createGroup(hostname, matches));
+    groups.push(createGroup(hostname, matches, sitePaused));
     ruleCount += matches.length;
   }
   elements.groups.replaceChildren(...groups);
@@ -97,7 +119,7 @@ async function loadRules() {
       if (!key.startsWith(SITE_SELECTORS_PREFIX)) continue;
       const hostname = key.slice(SITE_SELECTORS_PREFIX.length);
       const rules = getSiteRules(stored, hostname);
-      if (hostname && rules.length) sites.push([hostname, rules]);
+      if (hostname && rules.length) sites.push([hostname, rules, stored[sitePausedKey(hostname)] === true]);
     }
     sites.sort(([first], [second]) => first.localeCompare(second));
     if (elements.notice.classList.contains("is-error")) setNotice("");
@@ -213,7 +235,8 @@ elements.dialog.addEventListener("close", () => {
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && Object.keys(changes).some((key) =>
-    key.startsWith(SITE_SELECTORS_PREFIX) || key.startsWith(SITE_RULE_DETAILS_PREFIX))) loadRules();
+    key.startsWith(SITE_SELECTORS_PREFIX) || key.startsWith(SITE_RULE_DETAILS_PREFIX) ||
+    key.startsWith(SITE_PAUSED_PREFIX))) loadRules();
   if (area === "local" && Object.hasOwn(changes, TOTAL_CLICK_COUNT_KEY)) loadClickStats();
 });
 loadRules();

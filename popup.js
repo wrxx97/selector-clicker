@@ -13,6 +13,7 @@ const elements = {
   pickerStatus: document.querySelector("#picker-status"),
   siteRules: document.querySelector("#site-rules"),
   siteRuleList: document.querySelector("#site-rule-list"),
+  toggleSitePause: document.querySelector("#toggle-site-pause"),
   ruleCount: document.querySelector("#rule-count"),
   emptyRules: document.querySelector("#empty-rules"),
   settingsStatus: document.querySelector("#settings-status"),
@@ -26,6 +27,7 @@ const elements = {
 let activeTab;
 let activeHostname;
 let pageClicks;
+let sitePaused = false;
 
 function setFeedback(element, text, error = false) {
   element.textContent = text;
@@ -84,7 +86,7 @@ async function refreshPageStatus() {
 }
 
 function renderSiteRules(rules) {
-  const items = rules.map(({ selector, name, id }) => {
+  const items = rules.map(({ selector, name, id, paused }) => {
     const item = document.createElement("li");
     const details = document.createElement("div");
     details.className = "rule-details";
@@ -100,6 +102,7 @@ function renderSiteRules(rules) {
     actions.className = "site-rule-actions";
     for (const [label, action] of [
       ["测试", (button) => testSiteRule(selector, button)],
+      [paused ? "恢复" : "暂停", (button) => changePause(button, { selector, expectedId: id, paused: !paused })],
       ["重新选取", (button) => startPicker(button, { selector, expectedId: id })]
     ]) {
       const button = document.createElement("button");
@@ -120,6 +123,8 @@ function renderSiteRules(rules) {
     return item;
   });
   elements.siteRuleList.replaceChildren(...items);
+  elements.toggleSitePause.hidden = !items.length;
+  elements.toggleSitePause.textContent = sitePaused ? "恢复当前站点" : "暂停当前站点";
   elements.siteRules.hidden = !items.length;
   elements.emptyRules.hidden = items.length > 0;
   elements.ruleCount.hidden = false;
@@ -134,6 +139,8 @@ async function testSiteRule(selector, button) {
     hidden: "匹配的元素不可见。",
     disabled: "匹配的元素不可点击。",
     cooldown: "匹配的元素仍在点击冷却中。",
+    "site-paused": "当前站点已暂停。",
+    "rule-paused": "这条规则已暂停。",
     invalid: "CSS 选择器格式无效。"
   };
   button.disabled = true;
@@ -144,6 +151,21 @@ async function testSiteRule(selector, button) {
     setFeedback(elements.pickerStatus, text);
   } catch {
     setFeedback(elements.pickerStatus, "无法测试此页面，请刷新后重试。", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function changePause(button, options) {
+  button.disabled = true;
+  try {
+    const type = options.selector ? "set-rule-paused" : "set-site-paused";
+    const result = await chrome.runtime.sendMessage({ type, hostname: activeHostname, ...options });
+    if (!result?.ok) throw new Error("Pause failed");
+    setFeedback(elements.pickerStatus, options.paused ? "已暂停自动点击。" : "已恢复自动点击。");
+    await loadSiteRules();
+  } catch {
+    setFeedback(elements.pickerStatus, "无法修改暂停状态，请重试。", true);
   } finally {
     button.disabled = false;
   }
@@ -169,8 +191,10 @@ async function removeSiteRule(selector, button) {
 async function loadSiteRules() {
   const stored = await chrome.storage.sync.get({
     [siteSelectorsKey(activeHostname)]: [],
-    [siteRuleDetailsKey(activeHostname)]: {}
+    [siteRuleDetailsKey(activeHostname)]: {},
+    [sitePausedKey(activeHostname)]: false
   });
+  sitePaused = stored[sitePausedKey(activeHostname)] === true;
   renderSiteRules(getSiteRules(stored, activeHostname));
 }
 
@@ -214,6 +238,7 @@ async function startPicker(button, rule = {}) {
 }
 
 elements.pickElement.addEventListener("click", () => startPicker(elements.pickElement));
+elements.toggleSitePause.addEventListener("click", () => changePause(elements.toggleSitePause, { paused: !sitePaused }));
 
 elements.save.addEventListener("click", () => saveSettings(true));
 elements.enabled.addEventListener("change", () => saveSettings());

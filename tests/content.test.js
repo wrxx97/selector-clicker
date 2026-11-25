@@ -385,3 +385,27 @@ test("stops clicking after the extension is disabled through storage", async () 
   assert.equal(closeButton.state.clicks, 1);
   assert.deepEqual(toPlainObject(app.messages.at(-1)), { type: "reset-badge" });
 });
+
+test("pauses one rule independently and disconnects scans while the site is paused", async () => {
+  const pausedButton = createElement();
+  const activeButton = createElement();
+  const detailsKey = "siteRuleDetails:example.com";
+  const app = await startContentScript({
+    config: {
+      enabled: true,
+      [siteKey]: ["#one", "#two"],
+      [detailsKey]: { "selector:#one": { paused: true } }
+    },
+    elementsBySelector: { "#one": [pausedButton], "#two": [activeButton] }
+  });
+  assert.equal(pausedButton.state.clicks, 0);
+  assert.equal(activeButton.state.clicks, 1);
+  const update = (changes) => app.storageListeners[0](changes, "sync");
+  update({ "sitePaused:example.com": { newValue: true } });
+  update({ [detailsKey]: { newValue: {} } });
+  assert.equal(app.observer.options, undefined);
+  sendMessage(app.runtimeListeners[0], { type: "scan-now" });
+  assert.equal(pausedButton.state.clicks, 0);
+  update({ "sitePaused:example.com": { newValue: false } });
+  assert.equal(pausedButton.state.clicks, 1);
+});

@@ -8,7 +8,7 @@ const DEFAULTS = {
 let siteRuleUpdates = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
 
-function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId }) {
+function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused }) {
   const key = siteSelectorsKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
   const update = siteRuleUpdates.then(async () => {
@@ -28,7 +28,7 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
           next = [...current, selector];
           details = { ...currentDetails, [selectorKey]: { id: crypto.randomUUID(), name: name || "" } };
         } else if (name && name !== existing?.name) {
-          details = { ...currentDetails, [selectorKey]: { id: existing?.id || selectorKey, name } };
+          details = { ...currentDetails, [selectorKey]: { ...existing, id: existing?.id || selectorKey, name } };
         }
         break;
       case "remove-site-selector":
@@ -54,8 +54,19 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
         details = { ...currentDetails };
         delete details[selectorKey];
         details[ruleSelectorKey(replacement)] = {
+          ...existing,
           id: existing?.id || selectorKey,
           name: name ?? existing?.name ?? ""
+        };
+        break;
+      case "set-rule-paused":
+        if (index === -1 || expectedId !== (existing?.id || selectorKey)) {
+          return { ok: false, reason: "missing" };
+        }
+        if (paused === (existing?.paused === true)) break;
+        details = {
+          ...currentDetails,
+          [selectorKey]: { ...existing, id: expectedId, name: existing?.name || "", paused }
         };
         break;
     }
@@ -130,18 +141,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type: messageType, selector, expectedId } = message;
   const isPickedReplacement = messageType === "replace-picked-selector";
   const type = isPickedReplacement ? "edit-site-selector" : messageType;
-  if (type !== "save-site-selector" && type !== "remove-site-selector" && type !== "edit-site-selector") return;
+  if (!["save-site-selector", "remove-site-selector", "edit-site-selector", "set-rule-paused", "set-site-paused"].includes(type)) return;
 
   const hostname = type === "save-site-selector" || isPickedReplacement ? getSiteHostname(sender.url) : message.hostname;
-  const replacement = typeof message.replacement === "string" ? message.replacement : "";
-  const name = typeof message.name === "string" ? message.name.trim().slice(0, RULE_NAME_MAX_LENGTH) : undefined;
-  if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
-      typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim()) ||
-      (isPickedReplacement && (typeof expectedId !== "string" || !expectedId))) {
+  if (!hostname || getSiteHostname(`https://${hostname}`) !== hostname) {
     sendResponse({ ok: false });
     return;
   }
-  updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId }).then(
+  const { paused } = message;
+  if (type === "set-site-paused") {
+    if (typeof paused !== "boolean") {
+      sendResponse({ ok: false });
+      return;
+    }
+    const key = sitePausedKey(hostname);
+    const update = siteRuleUpdates.then(() => paused ? chrome.storage.sync.set({ [key]: true }) : chrome.storage.sync.remove(key));
+    siteRuleUpdates = update.catch(() => {});
+    update.then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  const replacement = typeof message.replacement === "string" ? message.replacement : "";
+  const name = typeof message.name === "string" ? message.name.trim().slice(0, RULE_NAME_MAX_LENGTH) : undefined;
+  if (typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim()) ||
+      (isPickedReplacement && (typeof expectedId !== "string" || !expectedId)) ||
+      (type === "set-rule-paused" && (typeof paused !== "boolean" || typeof expectedId !== "string" || !expectedId))) {
+    sendResponse({ ok: false });
+    return;
+  }
+  updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused }).then(
     sendResponse,
     () => sendResponse({ ok: false })
   );

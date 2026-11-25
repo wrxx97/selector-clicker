@@ -160,6 +160,25 @@ test("re-picking is scoped to the sender site and refuses to replace a recreated
   assert.deepEqual(await worker.send(request, sender), { ok: false, reason: "missing" });
 });
 
+test("preserves a paused rule through an edit and isolates the site pause", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const selector = "#close";
+  const sender = { url: `https://${hostname}/` };
+  await worker.send({ type: "save-site-selector", selector, name: "Close" }, sender);
+  const detailsKey = "siteRuleDetails:example.com";
+  const { id } = worker.store.get(detailsKey)["selector:#close"];
+  await worker.send({ type: "set-rule-paused", hostname, selector, expectedId: id, paused: true });
+  await worker.send({ type: "set-site-paused", hostname, paused: true });
+  await worker.send({ type: "edit-site-selector", hostname, selector, replacement: "#other" });
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), { id, name: "Close", paused: true });
+  assert.equal(worker.store.get("sitePaused:example.com"), true);
+  assert.equal(worker.store.has("sitePaused:other.example"), false);
+  await worker.send({ type: "set-site-paused", hostname, paused: false });
+  assert.equal(worker.store.has("sitePaused:example.com"), false);
+  assert.equal(worker.store.get(detailsKey)["selector:#other"].paused, true);
+});
+
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {
   const worker = createWorker();
   const ruleId = "selector:#close";
