@@ -1,18 +1,19 @@
 (() => {
   const hostname = getSiteHostname(location.href);
   const siteKey = hostname ? siteSelectorsKey(hostname) : null;
+  const detailsKey = hostname ? siteRuleDetailsKey(hostname) : null;
   const DEFAULTS = {
     enabled: false,
     cooldown: 8000,
-    ...(siteKey ? { [siteKey]: [] } : {})
+    ...(siteKey ? { [siteKey]: [], [detailsKey]: {} } : {})
   };
 
   let config = { ...DEFAULTS };
   let mutationTimer = null;
   let totalClicks = 0;
   const lastClicks = new WeakMap();
-  const picker = createElementPicker(async (selector) => {
-    const response = await chrome.runtime.sendMessage({ type: "save-site-selector", selector });
+  const picker = createElementPicker(async (selector, name) => {
+    const response = await chrome.runtime.sendMessage({ type: "save-site-selector", selector, name });
     if (!response?.ok) throw new Error("Could not save site rule");
   }, scheduleScan);
 
@@ -36,30 +37,29 @@
     return Date.now() - lastClick >= config.cooldown;
   }
 
-  function clickElement(element, selector) {
+  function clickElement(element) {
     if (!canClick(element)) return false;
 
     lastClicks.set(element, Date.now());
     element.click();
     totalClicks += 1;
-    chrome.runtime.sendMessage({
-      type: "click-record",
-      totalClicks,
-      selector
-    });
     return true;
   }
 
   function scan() {
     if (!config.enabled || !siteKey || picker.active) return;
 
-    for (const selector of config[siteKey]) {
+    const ruleIds = [];
+    for (const { selector, id } of getSiteRules(config, hostname)) {
       try {
         const matches = document.querySelectorAll(selector);
-        if (matches.length === 1) clickElement(matches[0], selector);
+        if (matches.length === 1 && clickElement(matches[0])) ruleIds.push(id);
       } catch {
         // Skip malformed stored rules and continue checking the site.
       }
+    }
+    if (ruleIds.length) {
+      chrome.runtime.sendMessage({ type: "click-record", totalClicks, ruleIds });
     }
   }
 
@@ -99,6 +99,10 @@
     const changedConfig = { ...config };
     for (const key of changedKeys) {
       changedConfig[key] = changes[key].newValue ?? DEFAULTS[key];
+    }
+    if (changedKeys.length === 1 && changedKeys[0] === detailsKey) {
+      config = changedConfig;
+      return;
     }
     applyConfig(changedConfig);
   });

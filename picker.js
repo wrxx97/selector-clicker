@@ -62,6 +62,8 @@ const PICKER_STYLES = `
     box-sizing: border-box;
     width: max-content;
     max-width: min(390px, calc(100% - 40px));
+    max-height: calc(100% - 40px);
+    overflow: auto;
     padding: 15px 16px;
     border: 1px solid #d6e4f4;
     border-radius: 14px;
@@ -91,6 +93,18 @@ const PICKER_STYLES = `
     color: #234e7b;
     font: 12px/1.45 ui-monospace, monospace;
   }
+  .name-field { display: block; margin-top: 10px; font-size: 13px; font-weight: 600; }
+  .name-field input {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 4px;
+    padding: 7px 9px;
+    border: 1px solid #d6e4f4;
+    border-radius: 7px;
+    color: #172e4b;
+    font: inherit;
+    font-weight: 400;
+  }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button {
     padding: 6px 10px;
@@ -104,7 +118,7 @@ const PICKER_STYLES = `
     cursor: pointer;
   }
   button:hover:enabled { background: #eff6ff; }
-  button:focus-visible { outline: 2px solid #296fb1; outline-offset: 2px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #296fb1; outline-offset: 2px; }
   .save { margin-left: auto; border-color: #225f9d; background: #225f9d; color: #fff; }
   .save:hover:enabled { border-color: #194d82; background: #194d82; }
   button:disabled { opacity: .55; cursor: default; }
@@ -140,13 +154,19 @@ function createElementPicker(saveRule, resumeScan) {
     const status = createNode("p", "status");
     status.setAttribute("role", "status");
     const preview = createNode("code", "selector");
+    const nameField = createNode("label", "name-field", "备注名称（选填）");
+    const nameInput = createNode("input", "");
+    nameInput.type = "text";
+    nameInput.maxLength = RULE_NAME_MAX_LENGTH;
+    nameInput.placeholder = "例如关闭活动弹窗";
+    nameField.append(nameInput);
     const actions = createNode("div", "actions");
     const cancel = createNode("button", "", "取消");
     const retry = createNode("button", "", "重新选取");
     const save = createNode("button", "save", "保存规则");
     for (const button of [cancel, retry, save]) button.type = "button";
     actions.append(cancel, retry, save);
-    panel.append(title, status, preview, actions);
+    panel.append(title, status, preview, nameField, actions);
     shadow.append(surface, outline, panel);
 
     let hovered;
@@ -170,6 +190,8 @@ function createElementPicker(saveRule, resumeScan) {
       selected = null;
       hovered = null;
       preview.hidden = true;
+      nameField.hidden = true;
+      nameInput.value = "";
       actions.hidden = true;
       panel.classList.remove("confirming");
       title.textContent = "选取要自动点击的元素";
@@ -191,6 +213,7 @@ function createElementPicker(saveRule, resumeScan) {
       outline.remove();
       actions.hidden = true;
       preview.hidden = true;
+      nameField.hidden = true;
       panel.classList.remove("confirming");
       title.textContent = "规则已保存";
       status.textContent = `适用网站：${hostname}`;
@@ -225,12 +248,13 @@ function createElementPicker(saveRule, resumeScan) {
       selected = { target, selector };
       preview.textContent = selector;
       preview.hidden = false;
+      nameField.hidden = false;
       actions.hidden = false;
       panel.classList.add("confirming");
       title.textContent = "确认站点规则";
       status.textContent = `当前页面匹配 ${count} 个元素。仅在 ${hostname} 生效。`;
       updateOutline();
-      save.focus({ preventScroll: true });
+      nameInput.focus({ preventScroll: true });
     }, { signal });
 
     save.addEventListener("click", async () => {
@@ -243,19 +267,27 @@ function createElementPicker(saveRule, resumeScan) {
         return;
       }
       saving = true;
+      nameInput.readOnly = true;
       for (const button of [cancel, retry, save]) button.disabled = true;
       status.textContent = "正在保存规则…";
       try {
-        await saveRule(selector);
+        await saveRule(selector, nameInput.value);
         finish(true);
       } catch {
         status.textContent = "保存失败，请重试。";
         for (const button of [cancel, retry, save]) button.disabled = false;
       } finally {
         saving = false;
+        nameInput.readOnly = false;
       }
     }, { signal });
 
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        save.click();
+      }
+    }, { signal });
     retry.addEventListener("click", () => {
       save.disabled = false;
       resetSelection();
@@ -267,7 +299,7 @@ function createElementPicker(saveRule, resumeScan) {
       event.stopImmediatePropagation();
       finish();
     }, { capture: true, signal });
-    for (const type of ["click", "pointerdown", "pointerup", "mousedown", "mouseup", "contextmenu"]) {
+    for (const type of ["click", "pointerdown", "pointerup", "mousedown", "mouseup", "contextmenu", "keydown", "keyup"]) {
       shadow.addEventListener(type, (event) => event.stopPropagation(), { signal });
     }
     window.addEventListener("scroll", updateOutline, { capture: true, signal });

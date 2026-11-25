@@ -183,8 +183,17 @@ p {
 .empty-rules,
 .feedback,
 .page-stat {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+#click-count:not([hidden]) + #total-click-count::before {
+  margin-right: 8px;
+  content: "·";
 }
 
 .section-label {
@@ -203,6 +212,25 @@ p {
 .rule-count {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.site-tools {
+  display: grid;
+  flex-shrink: 0;
+  justify-items: end;
+  gap: 3px;
+}
+
+.site-tools .manage-rules {
+  min-height: 27px;
+  padding: 3px 8px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.site-tools .manage-rules:hover {
+  background: #d9e9fd;
 }
 
 button {
@@ -285,6 +313,16 @@ button:disabled {
   color: #234e7b;
   font: 12px/1.45 "Cascadia Code", Consolas, monospace;
   overflow-wrap: anywhere;
+}
+
+.rule-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rule-details strong {
+  display: block;
+  margin-bottom: 2px;
 }
 
 .remove-rule {

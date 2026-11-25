@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>规则管理 · Selector Clicker</title>
+    <link rel="stylesheet" href="rules.css" />
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="page-header">
+        <img src="icons/icon-48.png" width="48" height="48" alt="" />
+        <div>
+          <p class="product-name">Selector Clicker</p>
+          <h1>规则管理</h1>
+        </div>
+        <div class="total-clicks" title="统计保存在此浏览器中">
+          <span>本机累计点击</span>
+          <strong id="total-clicks">—</strong>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <input id="rule-search" type="search" aria-label="搜索网站、备注或选择器" placeholder="搜索网站、备注或选择器" spellcheck="false" />
+        <p id="rule-summary" class="summary" role="status">正在读取规则…</p>
+      </div>
+      <p id="notice" class="notice" role="status"></p>
+      <div id="site-groups" class="site-groups"></div>
+      <section id="empty-state" class="empty-state" hidden>
+        <h2 id="empty-title"></h2>
+        <p id="empty-description"></p>
+      </section>
+    </main>
+
+    <template id="group-template">
+      <section class="site-group">
+        <header class="group-header">
+          <h2></h2>
+          <span></span>
+        </header>
+        <ul class="rule-list"></ul>
+      </section>
+    </template>
+    <template id="rule-template">
+      <li class="rule-row">
+        <div class="rule-details">
+          <strong class="rule-name" hidden></strong>
+          <code></code>
+        </div>
+        <div class="row-actions">
+          <span class="rule-click-count" title="本机累计自动点击次数"></span>
+          <button class="edit-rule" type="button">编辑</button>
+          <button class="remove-rule" type="button">移除</button>
+        </div>
+      </li>
+    </template>
+
+    <dialog id="rule-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-site">
+      <form id="rule-form">
+        <h2 id="dialog-title"></h2>
+        <p id="dialog-site" class="dialog-site"></p>
+        <div id="selector-editor">
+          <label for="name-input">备注名称（选填）</label>
+          <input id="name-input" type="text" />
+          <label for="selector-input">CSS 选择器</label>
+          <textarea id="selector-input" rows="3" spellcheck="false"></textarea>
+        </div>
+        <code id="selector-preview" hidden></code>
+        <p id="dialog-error" class="dialog-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancel-action" type="button">取消</button>
+          <button id="confirm-action" class="primary" type="submit"></button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="site-rules.js"></script>
+    <script src="rules.js"></script>
+  </body>
+</html>

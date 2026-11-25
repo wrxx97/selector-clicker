@@ -23,6 +23,10 @@
   "background": {
     "service_worker": "service-worker.js"
   },
+  "options_ui": {
+    "page": "rules.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

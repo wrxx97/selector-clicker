@@ -26,7 +26,10 @@
             <p class="section-label">当前网站</p>
             <h2 id="site-name">正在读取…</h2>
           </div>
-          <span id="rule-count" class="rule-count" hidden></span>
+          <div class="site-tools">
+            <button id="manage-rules" class="manage-rules" type="button">管理规则</button>
+            <span id="rule-count" class="rule-count" hidden></span>
+          </div>
         </div>
         <button id="pick-element" class="pick-element" type="button" disabled>
           <span class="target" aria-hidden="true"></span>
@@ -54,7 +57,10 @@
         <p id="settings-status" class="feedback" role="status"></p>
       </section>
 
-      <footer id="click-count" class="page-stat" hidden></footer>
+      <footer class="page-stat">
+        <span id="click-count" hidden></span>
+        <span id="total-click-count" hidden></span>
+      </footer>
     </main>
     <script src="site-rules.js"></script>
     <script src="popup.js"></script>

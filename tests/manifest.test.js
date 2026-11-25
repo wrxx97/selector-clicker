@@ -24,3 +24,8 @@ test("declares the extension popup and service worker", () => {
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.equal(manifest.background.service_worker, "service-worker.js");
 });
+
+test("declares the rules manager as an options page that opens in a tab", () => {
+  assert.deepEqual(manifest.options_ui, { page: "rules.html", open_in_tab: true });
+  assert.ok(fs.existsSync(path.join(__dirname, "..", manifest.options_ui.page)));
+});

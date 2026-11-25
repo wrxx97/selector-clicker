@@ -8,6 +8,7 @@ const elements = {
   cooldown: document.querySelector("#cooldown"),
   save: document.querySelector("#save"),
   scanNow: document.querySelector("#scan-now"),
+  manageRules: document.querySelector("#manage-rules"),
   pickElement: document.querySelector("#pick-element"),
   pickerStatus: document.querySelector("#picker-status"),
   siteRules: document.querySelector("#site-rules"),
@@ -18,7 +19,8 @@ const elements = {
   siteName: document.querySelector("#site-name"),
   status: document.querySelector("#status"),
   statusDot: document.querySelector("#status-dot"),
-  clickCount: document.querySelector("#click-count")
+  clickCount: document.querySelector("#click-count"),
+  totalClickCount: document.querySelector("#total-click-count")
 };
 
 let activeTab;
@@ -36,6 +38,11 @@ function updateStatus(enabled, totalClicks = pageClicks) {
   elements.statusDot.classList.toggle("active", enabled);
   elements.clickCount.hidden = totalClicks == null;
   elements.clickCount.textContent = totalClicks == null ? "" : `本页已点击 ${totalClicks} 次`;
+}
+
+function updateTotalClickCount(count = 0) {
+  elements.totalClickCount.textContent = `本机累计 ${count.toLocaleString("zh-CN")} 次`;
+  elements.totalClickCount.hidden = false;
 }
 
 async function saveSettings(showFeedback = false) {
@@ -76,18 +83,26 @@ async function refreshPageStatus() {
   }
 }
 
-function renderSiteRules(selectors) {
-  const items = selectors.map((selector) => {
+function renderSiteRules(rules) {
+  const items = rules.map(({ selector, name }) => {
     const item = document.createElement("li");
+    const details = document.createElement("div");
+    details.className = "rule-details";
+    if (name) {
+      const label = document.createElement("strong");
+      label.textContent = name;
+      details.append(label);
+    }
     const code = document.createElement("code");
     code.textContent = selector;
+    details.append(code);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "remove-rule";
     remove.textContent = "移除";
-    remove.setAttribute("aria-label", `移除规则 ${selector}`);
+    remove.setAttribute("aria-label", `移除规则 ${name || selector}`);
     remove.addEventListener("click", () => removeSiteRule(selector, remove));
-    item.append(code, remove);
+    item.append(details, remove);
     return item;
   });
   elements.siteRuleList.replaceChildren(...items);
@@ -107,11 +122,19 @@ async function removeSiteRule(selector, button) {
       selector
     });
     if (!response?.ok) throw new Error("Could not remove site rule");
-    renderSiteRules(response.selectors);
+    await loadSiteRules();
   } catch {
     setFeedback(elements.pickerStatus, "移除失败，请重试。", true);
     button.disabled = false;
   }
+}
+
+async function loadSiteRules() {
+  const stored = await chrome.storage.sync.get({
+    [siteSelectorsKey(activeHostname)]: [],
+    [siteRuleDetailsKey(activeHostname)]: {}
+  });
+  renderSiteRules(getSiteRules(stored, activeHostname));
 }
 
 async function initialize() {
@@ -127,13 +150,18 @@ async function initialize() {
   elements.siteName.title = activeHostname;
 
   updateStatus(settings.enabled);
-  if (activeHostname) {
-    const key = siteSelectorsKey(activeHostname);
-    const { [key]: selectors } = await chrome.storage.sync.get({ [key]: [] });
-    renderSiteRules(selectors);
-  }
+  if (activeHostname) await loadSiteRules();
   await refreshPageStatus();
 }
+
+elements.manageRules.addEventListener("click", async () => {
+  try {
+    await chrome.runtime.openOptionsPage();
+    window.close();
+  } catch {
+    setFeedback(elements.pickerStatus, "无法打开规则管理页面，请重试。", true);
+  }
+});
 
 elements.pickElement.addEventListener("click", async () => {
   elements.pickElement.disabled = true;
@@ -166,3 +194,11 @@ elements.scanNow.addEventListener("click", async () => {
 });
 
 initialize();
+chrome.storage.local.get({ [TOTAL_CLICK_COUNT_KEY]: 0 }).then((stored) => {
+  updateTotalClickCount(stored[TOTAL_CLICK_COUNT_KEY]);
+}).catch(() => {});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && Object.hasOwn(changes, TOTAL_CLICK_COUNT_KEY)) {
+    updateTotalClickCount(changes[TOTAL_CLICK_COUNT_KEY].newValue);
+  }
+});

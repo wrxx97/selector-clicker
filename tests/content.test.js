@@ -175,7 +175,7 @@ test("clicks visible matching elements after the configuration loads", async () 
   assert.deepEqual(toPlainObject(app.messages[0]), {
     type: "click-record",
     totalClicks: 1,
-    selector: ".ad-close"
+    ruleIds: ["selector:.ad-close"]
   });
 });
 

@@ -6,19 +6,92 @@ const DEFAULTS = {
 };
 
 let siteRuleUpdates = Promise.resolve();
+let clickStatsUpdates = Promise.resolve();
 
-function updateSiteSelectors(hostname, selector, remove) {
+function updateSiteSelectors(hostname, { type, selector, replacement, name }) {
   const key = siteSelectorsKey(hostname);
+  const detailsKey = siteRuleDetailsKey(hostname);
   const update = siteRuleUpdates.then(async () => {
-    const { [key]: current } = await chrome.storage.sync.get({ [key]: [] });
-    const next = remove ? current.filter((rule) => rule !== selector) : [...new Set([...current, selector])];
-    if (next.length !== current.length) {
-      if (next.length) await chrome.storage.sync.set({ [key]: next });
-      else await chrome.storage.sync.remove(key);
+    const { [key]: current, [detailsKey]: currentDetails } = await chrome.storage.sync.get({
+      [key]: [],
+      [detailsKey]: {}
+    });
+    const index = current.indexOf(selector);
+    const selectorKey = ruleSelectorKey(selector);
+    const existing = currentDetails[selectorKey];
+    let next = current;
+    let details = currentDetails;
+
+    switch (type) {
+      case "save-site-selector":
+        if (index === -1) {
+          next = [...current, selector];
+          details = { ...currentDetails, [selectorKey]: { id: crypto.randomUUID(), name: name || "" } };
+        } else if (name && name !== existing?.name) {
+          details = { ...currentDetails, [selectorKey]: { id: existing?.id || selectorKey, name } };
+        }
+        break;
+      case "remove-site-selector":
+        if (index !== -1) {
+          next = current.filter((rule) => rule !== selector);
+          if (existing) {
+            details = { ...currentDetails };
+            delete details[selectorKey];
+          }
+        }
+        break;
+      case "edit-site-selector":
+        if (index === -1) return { ok: false, reason: "missing" };
+        if (selector !== replacement) {
+          if (current.includes(replacement)) return { ok: false, reason: "duplicate" };
+          next = current.slice();
+          next[index] = replacement;
+        } else if (name == null || name === (existing?.name || "")) {
+          break;
+        }
+        details = { ...currentDetails };
+        delete details[selectorKey];
+        details[ruleSelectorKey(replacement)] = {
+          id: existing?.id || selectorKey,
+          name: name ?? existing?.name ?? ""
+        };
+        break;
     }
-    return next;
+
+    if (next !== current || details !== currentDetails) {
+      if (!next.length) {
+        await chrome.storage.sync.remove([key, detailsKey]);
+      } else {
+        const changes = {};
+        if (next !== current) changes[key] = next;
+        if (details !== currentDetails) changes[detailsKey] = details;
+        await chrome.storage.sync.set(changes);
+      }
+    }
+    return { ok: true, selectors: next };
   });
   siteRuleUpdates = update.catch(() => {});
+  return update;
+}
+
+function recordClickStats(hostname, ruleIds) {
+  const siteKey = siteClickCountsKey(hostname);
+  const update = clickStatsUpdates.then(async () => {
+    const { [siteKey]: currentCounts, [TOTAL_CLICK_COUNT_KEY]: total } = await chrome.storage.local.get({
+      [siteKey]: {},
+      [TOTAL_CLICK_COUNT_KEY]: 0
+    });
+    const counts = { ...currentCounts };
+    for (const id of ruleIds) {
+      const key = `rule:${id}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    await chrome.storage.local.set({
+      [siteKey]: counts,
+      [TOTAL_CLICK_COUNT_KEY]: total + ruleIds.length
+    });
+  });
+  clickStatsUpdates = update.catch(() => {});
   return update;
 }
 
@@ -28,10 +101,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "click-record" && sender.tab?.id) {
+  if (message.type === "click-record" && sender.tab?.id != null) {
     const text = String(message.totalClicks || "");
     chrome.action.setBadgeText({ tabId: sender.tab.id, text });
     chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: "#176f3c" });
+    const hostname = getSiteHostname(sender.url);
+    const ruleIds = Array.isArray(message.ruleIds)
+      ? message.ruleIds.filter((id) => typeof id === "string" && id)
+      : [];
+    if (!hostname || !ruleIds.length) return;
+    recordClickStats(hostname, ruleIds).then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
   }
 
   if (message.type === "reset-badge" && sender.tab?.id) {
@@ -42,19 +125,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse(DEFAULTS);
   }
 
-  if (message.type === "save-site-selector" || message.type === "remove-site-selector") {
-    const remove = message.type === "remove-site-selector";
-    const hostname = remove ? message.hostname : getSiteHostname(sender.url);
-    if (!hostname || typeof message.selector !== "string" || !message.selector.trim()) {
-      sendResponse({ ok: false });
-      return;
-    }
-    updateSiteSelectors(hostname, message.selector, remove).then(
-      (selectors) => sendResponse({ ok: true, selectors }),
-      () => sendResponse({ ok: false })
-    );
-    return true;
+  const { type, selector } = message;
+  if (type !== "save-site-selector" && type !== "remove-site-selector" && type !== "edit-site-selector") return;
+
+  const hostname = type === "save-site-selector" ? getSiteHostname(sender.url) : message.hostname;
+  const replacement = typeof message.replacement === "string" ? message.replacement : "";
+  const name = typeof message.name === "string" ? message.name.trim().slice(0, RULE_NAME_MAX_LENGTH) : undefined;
+  if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
+      typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim())) {
+    sendResponse({ ok: false });
+    return;
   }
+  updateSiteSelectors(hostname, { type, selector, replacement, name }).then(
+    sendResponse,
+    () => sendResponse({ ok: false })
+  );
+  return true;
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
