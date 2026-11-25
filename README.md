@@ -22,7 +22,7 @@
 
 ## 📦 安装
 
-1. 下载或克隆本仓库。下载 ZIP 时先解压。
+1. 从 [GitHub Releases](https://github.com/wrxx97/selector-clicker/releases) 下载 `selector-clicker-<版本>.zip` 并解压，也可以克隆本仓库。
 2. 在 Chrome 打开 `chrome://extensions`，或在 Edge 打开 `edge://extensions`。
 3. 开启「开发者模式」，选择「加载已解压的扩展程序」（Load unpacked），然后选中包含 `manifest.json` 的目录。
 4. 打开或刷新目标网页，再通过浏览器工具栏打开 **Selector Clicker**。
@@ -74,14 +74,16 @@ node --test
 
 测试覆盖按站点执行、匹配歧义、页面变化触发、点击冷却、规则移除和旧版全局规则停用。
 
-## 📦 自动构建
+## 📦 自动构建与发布
 
 推送到 GitHub 分支时，如果 `manifest.json` 的 `version` 发生变化，**Build extension ZIP** 会运行测试并打包。同一次推送包含多笔提交时，按推送前后的版本比较，并打包推送后的版本。只改其他文件时不会触发工作流，只改 `manifest.json` 的其他字段时会跳过打包。
 
 在 [GitHub Actions](https://github.com/wrxx97/selector-clicker/actions/workflows/chrome-web-store.yml) 的运行详情中，从 **Artifacts** 下载 `selector-clicker-<版本>.zip`。也可以点击 **Run workflow** 为当前版本手动打包。
 
+将新版本推送到 `main` 后，测试和打包通过时会创建对应的 `v<版本>` 标签和 [GitHub Release](https://github.com/wrxx97/selector-clicker/releases)，并附上同一个 ZIP。其他分支和手动运行提供 Actions 构建产物。
+
 本地也可以用 Python 3 打包。
 
 ```powershell
-python scripts/package-chrome.py selector-clicker-1.0.0.zip
+python scripts/package-chrome.py selector-clicker-1.0.1.zip
 ```

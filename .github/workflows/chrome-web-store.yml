@@ -16,6 +16,9 @@ jobs:
     if: ${{ github.event.deleted != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact_id: ${{ steps.archive.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,9 +84,76 @@ jobs:
           python3 -m zipfile -t "$archive"
 
       - name: Save extension ZIP
+        id: archive
         if: steps.version.outputs.version != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: ${{ runner.temp }}/selector-clicker-${{ steps.version.outputs.version }}.zip
           if-no-files-found: error
           archive: false
+          overwrite: true
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: selector-clicker-release-${{ needs.build.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Download tested ZIP
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/release
+          skip-decompress: true
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          tag="v$BUILD_VERSION"
+          asset="selector-clicker-$BUILD_VERSION.zip"
+          archive="$RUNNER_TEMP/release/$asset"
+          test -s "$archive"
+
+          tag_exists=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+            --jq "any(.[]; .ref == \"refs/tags/$tag\")")
+          if [[ "$tag_exists" == true ]]; then
+            tag_commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/tags%2F$tag" --jq '.sha')
+            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+              echo "$tag already points to another commit. Choose a new extension version."
+              exit 1
+            fi
+          fi
+
+          if ! release=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish,assets); then
+            gh release create "$tag" "$archive" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "Selector Clicker $tag" --generate-notes
+            exit 0
+          fi
+
+          asset_uploaded() {
+            jq -e --arg name "$asset" 'any(.assets[]; .name == $name and .state == "uploaded")' <<<"$release" >/dev/null
+          }
+
+          if [[ "$(jq -r '.isDraft' <<<"$release")" == true ]]; then
+            if [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$GITHUB_SHA" ]]; then
+              echo "The draft for $tag targets another commit."
+              exit 1
+            fi
+            if ! asset_uploaded; then
+              gh release upload "$tag" "$archive" --repo "$GITHUB_REPOSITORY"
+            fi
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          elif [[ "$tag_exists" == true ]] && asset_uploaded; then
+            echo "$tag is already published with $asset."
+          else
+            echo "The existing release for $tag is missing its tag or ZIP asset."
+            exit 1
+          fi
