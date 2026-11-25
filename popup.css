@@ -408,3 +408,20 @@ button:disabled {
     transition: none;
   }
 }
+.site-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.site-rule-actions button:not(.remove-rule) {
+  padding: 3px 6px;
+  border: 1px solid #c9def4;
+  border-radius: 6px;
+  background: #f0f7ff;
+  color: #205481;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}

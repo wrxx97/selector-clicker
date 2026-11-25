@@ -146,6 +146,20 @@ test("saving an optional name keeps the existing selector array and stable rule 
   assert.deepEqual(structuredClone(worker.store.get(metaKey)["selector:#close"]), { id, name: "关闭通知" });
 });
 
+test("re-picking is scoped to the sender site and refuses to replace a recreated rule", async () => {
+  const worker = createWorker();
+  const sender = { url: "https://example.com/" };
+  const detailsKey = "siteRuleDetails:example.com";
+  await worker.send({ type: "save-site-selector", selector: "#close", name: "Close" }, sender);
+  const { id } = worker.store.get(detailsKey)["selector:#close"];
+  const request = { type: "replace-picked-selector", selector: "#close", replacement: "#new", expectedId: id };
+  assert.deepEqual(await worker.send(request, { url: "https://other.example/" }), { ok: false, reason: "missing" });
+  assert.deepEqual(await worker.send(request, sender), { ok: true, selectors: ["#new"] });
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#new"]), { id, name: "Close" });
+  await worker.send({ type: "save-site-selector", selector: "#close" }, sender);
+  assert.deepEqual(await worker.send(request, sender), { ok: false, reason: "missing" });
+});
+
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {
   const worker = createWorker();
   const ruleId = "selector:#close";

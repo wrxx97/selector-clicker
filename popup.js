@@ -84,7 +84,7 @@ async function refreshPageStatus() {
 }
 
 function renderSiteRules(rules) {
-  const items = rules.map(({ selector, name }) => {
+  const items = rules.map(({ selector, name, id }) => {
     const item = document.createElement("li");
     const details = document.createElement("div");
     details.className = "rule-details";
@@ -96,13 +96,27 @@ function renderSiteRules(rules) {
     const code = document.createElement("code");
     code.textContent = selector;
     details.append(code);
+    const actions = document.createElement("div");
+    actions.className = "site-rule-actions";
+    for (const [label, action] of [
+      ["测试", (button) => testSiteRule(selector, button)],
+      ["重新选取", (button) => startPicker(button, { selector, expectedId: id })]
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute("aria-label", `${label}规则 ${name || selector}`);
+      button.addEventListener("click", () => action(button));
+      actions.append(button);
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "remove-rule";
     remove.textContent = "移除";
     remove.setAttribute("aria-label", `移除规则 ${name || selector}`);
     remove.addEventListener("click", () => removeSiteRule(selector, remove));
-    item.append(details, remove);
+    actions.append(remove);
+    item.append(details, actions);
     return item;
   });
   elements.siteRuleList.replaceChildren(...items);
@@ -110,6 +124,29 @@ function renderSiteRules(rules) {
   elements.emptyRules.hidden = items.length > 0;
   elements.ruleCount.hidden = false;
   elements.ruleCount.textContent = `${items.length} 条规则`;
+}
+
+async function testSiteRule(selector, button) {
+  const messages = {
+    ready: "匹配到一个可点击元素，已在页面高亮。",
+    missing: "当前页面没有匹配元素。",
+    removed: "这条规则已移除或修改，请重新打开弹窗。",
+    hidden: "匹配的元素不可见。",
+    disabled: "匹配的元素不可点击。",
+    cooldown: "匹配的元素仍在点击冷却中。",
+    invalid: "CSS 选择器格式无效。"
+  };
+  button.disabled = true;
+  try {
+    const result = await chrome.tabs.sendMessage(activeTab.id, { type: "test-rule", hostname: activeHostname, selector });
+    if (!result) throw new Error("Page unavailable");
+    const text = result.status === "ambiguous" ? `匹配到 ${result.count} 个元素，请重新选取。` : messages[result.status];
+    setFeedback(elements.pickerStatus, text);
+  } catch {
+    setFeedback(elements.pickerStatus, "无法测试此页面，请刷新后重试。", true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function removeSiteRule(selector, button) {
@@ -163,18 +200,20 @@ elements.manageRules.addEventListener("click", async () => {
   }
 });
 
-elements.pickElement.addEventListener("click", async () => {
-  elements.pickElement.disabled = true;
+async function startPicker(button, rule = {}) {
+  button.disabled = true;
   setFeedback(elements.pickerStatus, "");
   try {
-    const response = await chrome.tabs.sendMessage(activeTab.id, { type: "start-picker" });
+    const response = await chrome.tabs.sendMessage(activeTab.id, { type: "start-picker", hostname: activeHostname, ...rule });
     if (!response?.ok) throw new Error("Could not start picker");
     window.close();
   } catch {
     setFeedback(elements.pickerStatus, "无法进入选取模式，请刷新网页后重试。", true);
-    elements.pickElement.disabled = false;
+    button.disabled = false;
   }
-});
+}
+
+elements.pickElement.addEventListener("click", () => startPicker(elements.pickElement));
 
 elements.save.addEventListener("click", () => saveSettings(true));
 elements.enabled.addEventListener("change", () => saveSettings());

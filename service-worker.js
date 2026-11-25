@@ -8,7 +8,7 @@ const DEFAULTS = {
 let siteRuleUpdates = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
 
-function updateSiteSelectors(hostname, { type, selector, replacement, name }) {
+function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId }) {
   const key = siteSelectorsKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
   const update = siteRuleUpdates.then(async () => {
@@ -41,7 +41,9 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name }) {
         }
         break;
       case "edit-site-selector":
-        if (index === -1) return { ok: false, reason: "missing" };
+        if (index === -1 || (expectedId && expectedId !== (existing?.id || selectorKey))) {
+          return { ok: false, reason: "missing" };
+        }
         if (selector !== replacement) {
           if (current.includes(replacement)) return { ok: false, reason: "duplicate" };
           next = current.slice();
@@ -125,18 +127,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse(DEFAULTS);
   }
 
-  const { type, selector } = message;
+  const { type: messageType, selector, expectedId } = message;
+  const isPickedReplacement = messageType === "replace-picked-selector";
+  const type = isPickedReplacement ? "edit-site-selector" : messageType;
   if (type !== "save-site-selector" && type !== "remove-site-selector" && type !== "edit-site-selector") return;
 
-  const hostname = type === "save-site-selector" ? getSiteHostname(sender.url) : message.hostname;
+  const hostname = type === "save-site-selector" || isPickedReplacement ? getSiteHostname(sender.url) : message.hostname;
   const replacement = typeof message.replacement === "string" ? message.replacement : "";
   const name = typeof message.name === "string" ? message.name.trim().slice(0, RULE_NAME_MAX_LENGTH) : undefined;
   if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
-      typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim())) {
+      typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim()) ||
+      (isPickedReplacement && (typeof expectedId !== "string" || !expectedId))) {
     sendResponse({ ok: false });
     return;
   }
-  updateSiteSelectors(hostname, { type, selector, replacement, name }).then(
+  updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId }).then(
     sendResponse,
     () => sendResponse({ ok: false })
   );

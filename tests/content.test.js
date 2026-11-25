@@ -12,6 +12,7 @@ const siteKey = "siteSelectors:example.com";
 function createElement(options = {}) {
   const state = {
     clicks: 0,
+    highlights: 0,
     disabled: false,
     connected: true,
     display: "block",
@@ -35,6 +36,10 @@ function createElement(options = {}) {
     },
     click() {
       state.clicks += 1;
+    },
+    animate() {
+      state.highlights += 1;
+      return { cancel() {} };
     }
   };
 }
@@ -322,6 +327,26 @@ test("respects the cooldown when an immediate scan is requested twice", async ()
 
   assert.equal(closeButton.state.clicks, 1);
   assert.deepEqual(toPlainObject(response), { totalClicks: 1 });
+});
+
+test("tests saved rules without clicking or recording statistics", async () => {
+  const target = createElement();
+  const hidden = createElement({ display: "none" });
+  const app = await startContentScript({
+    config: { [siteKey]: ["#ready", "#hidden", "#multiple", "#missing"] },
+    elementsBySelector: { "#ready": [target], "#hidden": [hidden], "#multiple": [target, hidden] }
+  });
+  const diagnose = (selector) => sendMessage(app.runtimeListeners[0], {
+    type: "test-rule", hostname: "example.com", selector
+  });
+  assert.equal(diagnose("#ready").status, "ready");
+  assert.equal(target.state.highlights, 1);
+  assert.equal(diagnose("#hidden").status, "hidden");
+  assert.equal(diagnose("#multiple").count, 2);
+  assert.equal(diagnose("#missing").status, "missing");
+  assert.equal(diagnose("#removed").status, "removed");
+  assert.equal(target.state.clicks, 0);
+  assert.equal(app.messages.some((message) => message.type === "click-record"), false);
 });
 
 test("keeps scanning valid selectors when another selector is invalid", async () => {

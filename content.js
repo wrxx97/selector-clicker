@@ -11,10 +11,19 @@
   let config = { ...DEFAULTS };
   let mutationTimer = null;
   let totalClicks = 0;
+  let ruleHighlight;
   const lastClicks = new WeakMap();
-  const picker = createElementPicker(async (selector, name) => {
-    const response = await chrome.runtime.sendMessage({ type: "save-site-selector", selector, name });
-    if (!response?.ok) throw new Error("Could not save site rule");
+  const picker = createElementPicker(async (selector, name, editing) => {
+    const message = editing
+      ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
+      : { type: "save-site-selector", selector, name };
+    const response = await chrome.runtime.sendMessage(message);
+    if (response?.ok) return;
+    const errors = {
+      missing: "规则已变更，请重新打开扩展。",
+      duplicate: "这个元素已有规则，请选取其他元素。"
+    };
+    throw new Error(errors[response?.reason] || "保存失败，请重试。");
   }, scheduleScan);
 
   function isVisible(element) {
@@ -29,21 +38,37 @@
     );
   }
 
-  function canClick(element) {
-    if (!element.isConnected || !isVisible(element)) return false;
-    if (element.matches("[disabled], [aria-disabled='true']")) return false;
-
-    const lastClick = lastClicks.get(element) || 0;
-    return Date.now() - lastClick >= config.cooldown;
+  function inspectRule(selector) {
+    let matches;
+    try {
+      matches = document.querySelectorAll(selector);
+    } catch {
+      return { status: "invalid" };
+    }
+    if (!matches.length) return { status: "missing" };
+    if (matches.length > 1) return { status: "ambiguous", count: matches.length };
+    const [target] = matches;
+    if (!target.isConnected || !isVisible(target)) return { status: "hidden" };
+    if (typeof target.click !== "function" || target.matches(":disabled, [aria-disabled='true']")) {
+      return { status: "disabled", target };
+    }
+    const lastClick = lastClicks.get(target);
+    const status = lastClick != null && Date.now() - lastClick < config.cooldown ? "cooldown" : "ready";
+    return { status, target };
   }
 
-  function clickElement(element) {
-    if (!canClick(element)) return false;
-
-    lastClicks.set(element, Date.now());
-    element.click();
-    totalClicks += 1;
-    return true;
+  function testRule(selector) {
+    const rule = getSiteRules(config, hostname).find((item) => item.selector === selector);
+    ruleHighlight?.cancel();
+    if (!rule) return { status: "removed" };
+    const { status, count, target } = inspectRule(rule.selector);
+    if (target) {
+      ruleHighlight = target.animate([
+        { outline: "3px solid #2978ce", outlineOffset: "3px" },
+        { outline: "3px solid transparent", outlineOffset: "5px" }
+      ], { duration: 2400, easing: "ease-in" });
+    }
+    return { status, count };
   }
 
   function scan() {
@@ -51,12 +76,12 @@
 
     const ruleIds = [];
     for (const { selector, id } of getSiteRules(config, hostname)) {
-      try {
-        const matches = document.querySelectorAll(selector);
-        if (matches.length === 1 && clickElement(matches[0])) ruleIds.push(id);
-      } catch {
-        // Skip malformed stored rules and continue checking the site.
-      }
+      const { status, target } = inspectRule(selector);
+      if (status !== "ready") continue;
+      lastClicks.set(target, Date.now());
+      target.click();
+      totalClicks += 1;
+      ruleIds.push(id);
     }
     if (ruleIds.length) {
       chrome.runtime.sendMessage({ type: "click-record", totalClicks, ruleIds });
@@ -118,13 +143,18 @@
       scan();
       sendResponse({ totalClicks });
     }
+    if (message.type === "test-rule" && message.hostname === hostname) {
+      sendResponse(testRule(message.selector));
+    }
     if (message.type === "start-picker") {
-      if (!hostname) {
+      const editing = message.selector && getSiteRules(config, hostname)
+        .find((rule) => rule.selector === message.selector && rule.id === message.expectedId);
+      if (!hostname || message.hostname !== hostname || (message.selector && !editing)) {
         sendResponse({ ok: false });
         return;
       }
       try {
-        picker.start(hostname);
+        picker.start(hostname, editing);
         sendResponse({ ok: true });
       } catch {
         sendResponse({ ok: false });

@@ -127,7 +127,7 @@ const PICKER_STYLES = `
 function createElementPicker(saveRule, resumeScan) {
   let session;
 
-  function start(hostname) {
+  function start(hostname, editing) {
     if (session?.host.isConnected) return;
     session?.controller.abort();
 
@@ -191,10 +191,10 @@ function createElementPicker(saveRule, resumeScan) {
       hovered = null;
       preview.hidden = true;
       nameField.hidden = true;
-      nameInput.value = "";
+      nameInput.value = editing?.name || "";
       actions.hidden = true;
       panel.classList.remove("confirming");
-      title.textContent = "选取要自动点击的元素";
+      title.textContent = editing ? "重新选取规则目标" : "选取要自动点击的元素";
       status.textContent = "移动鼠标高亮元素，单击选取。按 Esc 取消。";
       updateOutline();
     }
@@ -271,10 +271,10 @@ function createElementPicker(saveRule, resumeScan) {
       for (const button of [cancel, retry, save]) button.disabled = true;
       status.textContent = "正在保存规则…";
       try {
-        await saveRule(selector, nameInput.value);
+        await saveRule(selector, nameInput.value, editing);
         finish(true);
-      } catch {
-        status.textContent = "保存失败，请重试。";
+      } catch (error) {
+        status.textContent = error.message || "保存失败，请重试。";
         for (const button of [cancel, retry, save]) button.disabled = false;
       } finally {
         saving = false;
