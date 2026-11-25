@@ -357,7 +357,30 @@ dialog h2 {
 }
 .backup-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
+}
+
+#import-editor {
+  margin-top: 12px;
+}
+
+#import-editor label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+#backup-text {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f6faff;
+  color: #234e7b;
+  font: 13px/1.5 "Cascadia Code", Consolas, monospace;
+  resize: vertical;
 }
 
 #import-preview {

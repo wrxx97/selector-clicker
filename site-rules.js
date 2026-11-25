@@ -76,8 +76,8 @@ function getRuleSites(stored) {
   return sites.sort((first, second) => first.hostname.localeCompare(second.hostname));
 }
 
-function createRuleBackup(stored) {
-  const sites = getRuleSites(stored).map(({ hostname, paused, rules }) => ({
+function createRuleBackup(ruleSites) {
+  const sites = ruleSites.map(({ hostname, paused, rules }) => ({
     hostname,
     paused,
     rules: rules.map(({ selector, name, paused, pathPrefix, maxClicks }) => ({ selector, name, paused, pathPrefix, maxClicks }))

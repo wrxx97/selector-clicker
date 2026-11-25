@@ -26,13 +26,20 @@ const elements = {
 
 const backupElements = {
   importButton: document.querySelector("#import-rules"),
+  pasteButton: document.querySelector("#paste-rules"),
   exportButton: document.querySelector("#export-rules"),
+  copyButton: document.querySelector("#copy-rules"),
   file: document.querySelector("#backup-file"),
   dialog: document.querySelector("#import-dialog"),
   form: document.querySelector("#import-form"),
+  title: document.querySelector("#import-title"),
+  editor: document.querySelector("#import-editor"),
+  text: document.querySelector("#backup-text"),
+  plan: document.querySelector("#import-plan"),
   summary: document.querySelector("#import-summary"),
   preview: document.querySelector("#import-preview"),
   error: document.querySelector("#import-error"),
+  edit: document.querySelector("#edit-import"),
   cancel: document.querySelector("#cancel-import"),
   confirm: document.querySelector("#confirm-import")
 };
@@ -46,6 +53,7 @@ let pendingAction;
 let saving = false;
 let pendingBackup;
 let importing = false;
+const MAX_BACKUP_BYTES = 1024 * 1024;
 const countFormatter = new Intl.NumberFormat("zh-CN");
 elements.name.maxLength = RULE_NAME_MAX_LENGTH;
 
@@ -138,6 +146,7 @@ async function loadRules() {
     const stored = await chrome.storage.sync.get(null);
     if (revision !== loadRevision) return;
     sites = getRuleSites(stored);
+    backupElements.copyButton.disabled = false;
     if (elements.notice.classList.contains("is-error")) setNotice("");
     renderRules();
   } catch {
@@ -262,12 +271,15 @@ elements.dialog.addEventListener("close", () => {
   if (!elements.dialog.open) pendingAction = undefined;
 });
 
+function formatRuleBackup(ruleSites) {
+  return JSON.stringify(createRuleBackup(ruleSites), null, 2) + "\n";
+}
+
 backupElements.exportButton.addEventListener("click", async () => {
   backupElements.exportButton.disabled = true;
   try {
     const stored = await chrome.storage.sync.get(null);
-    const backup = createRuleBackup(stored);
-    const file = new Blob([JSON.stringify(backup, null, 2) + "\n"], { type: "application/json" });
+    const file = new Blob([formatRuleBackup(getRuleSites(stored))], { type: "application/json" });
     const url = URL.createObjectURL(file);
     const link = document.createElement("a");
     link.href = url;
@@ -282,57 +294,128 @@ backupElements.exportButton.addEventListener("click", async () => {
   }
 });
 
+backupElements.copyButton.addEventListener("click", async () => {
+  try {
+    // Use the loaded rules so the write starts directly from the click gesture.
+    await navigator.clipboard.writeText(formatRuleBackup(sites));
+    setNotice("规则 JSON 已复制到剪贴板。");
+  } catch {
+    setNotice("无法复制规则，请重试或导出文件。", true);
+  }
+});
+
+function showImportEditor() {
+  pendingBackup = undefined;
+  backupElements.title.textContent = "粘贴 JSON 导入";
+  backupElements.editor.hidden = false;
+  backupElements.plan.hidden = true;
+  backupElements.summary.textContent = "";
+  backupElements.error.textContent = "";
+  backupElements.edit.hidden = true;
+  backupElements.confirm.textContent = "预览导入";
+  backupElements.confirm.disabled = false;
+  if (!backupElements.dialog.open) backupElements.dialog.showModal();
+  backupElements.text.focus();
+}
+
+function parseBackupText(text) {
+  const input = text.trim();
+  if (!input) throw new Error("请输入或粘贴规则 JSON。");
+  if (new Blob([input]).size > MAX_BACKUP_BYTES) throw new Error("规则 JSON 不能超过 1 MB。");
+  let backup;
+  try {
+    backup = JSON.parse(input);
+  } catch {
+    throw new Error("JSON 格式无效，请检查内容是否完整。");
+  }
+  try {
+    const sites = parseRuleBackup(backup, (selector) => !validateReplacement(selector));
+    return { backup, sites };
+  } catch {
+    throw new Error("规则格式无效，请使用 Selector Clicker 导出的 JSON。");
+  }
+}
+
+async function showImportPreview(text, editable = false) {
+  const { backup, sites } = parseBackupText(text);
+  const stored = await chrome.storage.sync.get(null).catch(() => {
+    throw new Error("无法读取现有规则，请重试。");
+  });
+  let added = 0;
+  let duplicates = 0;
+  const entries = planRuleImport(stored, sites).map(({ hostname, added: newRules, duplicates: duplicateCount }) => {
+    added += newRules.length;
+    duplicates += duplicateCount;
+    const line = document.createElement("li");
+    line.textContent = `${hostname} · 新增 ${newRules.length} 条，重复 ${duplicateCount} 条`;
+    return line;
+  });
+  pendingBackup = backup;
+  backupElements.title.textContent = "预览导入规则";
+  backupElements.editor.hidden = true;
+  backupElements.plan.hidden = false;
+  backupElements.summary.textContent = `将新增 ${added} 条规则，跳过 ${duplicates} 条重复规则。`;
+  backupElements.preview.replaceChildren(...entries);
+  backupElements.error.textContent = "";
+  backupElements.edit.hidden = !editable;
+  backupElements.confirm.textContent = "导入新增规则";
+  backupElements.confirm.disabled = added === 0;
+  if (!backupElements.dialog.open) backupElements.dialog.showModal();
+  (added ? backupElements.confirm : backupElements.cancel).focus();
+}
+
 backupElements.importButton.addEventListener("click", () => backupElements.file.click());
+backupElements.pasteButton.addEventListener("click", () => {
+  backupElements.text.value = "";
+  showImportEditor();
+});
+backupElements.edit.addEventListener("click", showImportEditor);
 backupElements.file.addEventListener("change", async () => {
   const [file] = backupElements.file.files;
   backupElements.file.value = "";
   if (!file) return;
   backupElements.importButton.disabled = true;
+  backupElements.pasteButton.disabled = true;
   try {
-    if (file.size > 1024 * 1024) throw new Error("Backup file is too large");
-    const backup = JSON.parse(await file.text());
-    const incoming = parseRuleBackup(backup, (selector) => !validateReplacement(selector));
-    const preview = planRuleImport(await chrome.storage.sync.get(null), incoming);
-    let added = 0;
-    let duplicates = 0;
-    const entries = preview.map(({ hostname, added: newRules, duplicates: duplicateCount }) => {
-      added += newRules.length;
-      duplicates += duplicateCount;
-      const line = document.createElement("li");
-      line.textContent = `${hostname} · 新增 ${newRules.length} 条，重复 ${duplicateCount} 条`;
-      return line;
-    });
-    pendingBackup = backup;
-    backupElements.summary.textContent = `将新增 ${added} 条规则，跳过 ${duplicates} 条重复规则。`;
-    backupElements.preview.replaceChildren(...entries);
-    backupElements.error.textContent = "";
-    backupElements.confirm.disabled = added === 0;
-    backupElements.dialog.showModal();
-  } catch {
-    setNotice("无法读取备份，请选择有效的 Selector Clicker 规则 JSON 文件。", true);
+    if (file.size > MAX_BACKUP_BYTES) throw new Error("规则文件不能超过 1 MB。");
+    const text = await file.text().catch(() => { throw new Error("无法读取规则文件，请重试。"); });
+    await showImportPreview(text);
+  } catch (error) {
+    setNotice(error.message, true);
   } finally {
     backupElements.importButton.disabled = false;
+    backupElements.pasteButton.disabled = false;
   }
 });
 
 backupElements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (importing || !pendingBackup || backupElements.confirm.disabled) return;
+  const previewing = !backupElements.editor.hidden;
+  if (importing || backupElements.confirm.disabled || (!previewing && !pendingBackup)) return;
   importing = true;
   backupElements.confirm.disabled = true;
   backupElements.cancel.disabled = true;
+  backupElements.edit.disabled = true;
+  backupElements.text.readOnly = true;
   backupElements.error.textContent = "";
   try {
+    if (previewing) {
+      await showImportPreview(backupElements.text.value, true);
+      return;
+    }
     const result = await chrome.runtime.sendMessage({ type: "import-rules", backup: pendingBackup });
     if (!result?.ok) throw new Error("Could not import rules");
     backupElements.dialog.close();
     setNotice(`已导入 ${result.addedCount} 条规则，跳过 ${result.duplicateCount} 条重复规则。`);
-  } catch {
-    backupElements.error.textContent = "导入失败，请检查浏览器同步存储空间后重试。";
+  } catch (error) {
+    backupElements.error.textContent = previewing ? error.message : "导入失败，请检查浏览器同步存储空间后重试。";
     backupElements.confirm.disabled = false;
+    if (previewing) backupElements.text.focus();
   } finally {
     importing = false;
     backupElements.cancel.disabled = false;
+    backupElements.edit.disabled = false;
+    backupElements.text.readOnly = false;
   }
 });
 backupElements.cancel.addEventListener("click", () => backupElements.dialog.close());
@@ -340,7 +423,10 @@ backupElements.dialog.addEventListener("cancel", (event) => {
   if (importing) event.preventDefault();
 });
 backupElements.dialog.addEventListener("close", () => {
-  if (!backupElements.dialog.open) pendingBackup = undefined;
+  if (!backupElements.dialog.open) {
+    pendingBackup = undefined;
+    backupElements.text.value = "";
+  }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && Object.keys(changes).some((key) =>
