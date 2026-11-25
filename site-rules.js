@@ -1,10 +1,13 @@
-const SITE_SELECTORS_PREFIX = "siteSelectors:";
-const SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
-const SITE_PAUSED_PREFIX = "sitePaused:";
-const SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
-const TOTAL_CLICK_COUNT_KEY = "totalClickCount";
-const RULE_NAME_MAX_LENGTH = 80;
-const RULE_BACKUP_FORMAT = "selector-clicker-rules";
+// These shared scripts can be injected twice when a tab finishes loading during authorization.
+var SITE_SELECTORS_PREFIX = "siteSelectors:";
+var SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
+var SITE_PAUSED_PREFIX = "sitePaused:";
+var SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
+var TOTAL_CLICK_COUNT_KEY = "totalClickCount";
+var RULE_NAME_MAX_LENGTH = 80;
+var RULE_BACKUP_FORMAT = "selector-clicker-rules";
+var AUTHORIZED_SITES_KEY = "authorizedSitePatterns";
+var SITE_SCRIPT_FILES = ["site-rules.js", "picker.js", "content.js"];
 
 function getSiteHostname(url) {
   try {
@@ -13,6 +16,12 @@ function getSiteHostname(url) {
   } catch {
     return "";
   }
+}
+
+function getSiteAccessPattern(url) {
+  const hostname = getSiteHostname(url);
+  if (!hostname || hostname.includes("*")) return "";
+  return `${new URL(url).protocol}//${hostname}/*`;
 }
 
 function siteSelectorsKey(hostname) {

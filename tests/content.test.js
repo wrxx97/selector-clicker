@@ -48,7 +48,9 @@ async function startContentScript({
   config,
   elementsBySelector = {},
   invalidSelectors = [],
-  url = "https://example.com/"
+  url = "https://example.com/",
+  authorized = true,
+  reinject = false
 }) {
   const runtimeListeners = [];
   const storageListeners = [];
@@ -116,6 +118,13 @@ async function startContentScript({
         }
       },
       storage: {
+        local: {
+          get() {
+            const address = new URL(url);
+            const patterns = authorized ? [`${address.protocol}//${address.hostname}/*`] : [];
+            return Promise.resolve({ authorizedSitePatterns: patterns });
+          }
+        },
         sync: {
           get(defaults) {
             const settings = { ...defaults };
@@ -134,7 +143,9 @@ async function startContentScript({
     }
   };
 
-  vm.runInNewContext(contentScript, sandbox, { filename: "content.js" });
+  const context = vm.createContext(sandbox);
+  vm.runInContext(contentScript, context, { filename: "content.js" });
+  if (reinject) vm.runInContext(contentScript, context, { filename: "content.js" });
   await new Promise((resolve) => setImmediate(resolve));
 
   return {
@@ -429,4 +440,26 @@ test("enforces a segment-safe path prefix and a page limit when the target is re
   assert.equal(sendMessage(app.runtimeListeners[0], {
     type: "test-rule", hostname: "example.com", selector: "#close"
   }).status, "limit-reached");
+});
+
+test("runs only for the authorized origin and stops an open tab when access is revoked", async () => {
+  const target = createElement();
+  const app = await startContentScript({
+    authorized: false,
+    reinject: true,
+    config: { enabled: true, [siteKey]: ["#close"] },
+    elementsBySelector: { "#close": [target] }
+  });
+  const changeAccess = (newValue) => app.storageListeners[0]({ authorizedSitePatterns: { newValue } }, "local");
+  assert.equal(app.runtimeListeners.length, 1);
+  assert.equal(app.observer.options, undefined);
+  changeAccess(["http://example.com/*", "https://other.example/*"]);
+  assert.equal(target.state.clicks, 0);
+  changeAccess(["https://example.com/*"]);
+  assert.equal(target.state.clicks, 1);
+  app.observer.notify("childList");
+  changeAccess([]);
+  assert.equal(app.observer.options, undefined);
+  assert.equal(app.timeouts.size, 0);
+  assert.equal(sendMessage(app.runtimeListeners[0], { type: "get-status" }).authorized, false);
 });

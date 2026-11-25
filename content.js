@@ -1,4 +1,7 @@
 (() => {
+  if (globalThis.selectorClickerContentLoaded) return;
+  globalThis.selectorClickerContentLoaded = true;
+  const accessPattern = getSiteAccessPattern(location.href);
   const hostname = getSiteHostname(location.href);
   const siteKey = hostname ? siteSelectorsKey(hostname) : null;
   const detailsKey = hostname ? siteRuleDetailsKey(hostname) : null;
@@ -12,11 +15,16 @@
   let config = { ...DEFAULTS };
   let mutationTimer = null;
   let totalClicks = 0;
+  let siteAuthorized = false;
+  let initialized = false;
+  let authorizationChanged = false;
+  const pendingSettings = {};
   let ruleHighlight;
   let siteRules = [];
   const lastClicks = new WeakMap();
   const ruleClicks = new Map();
   const picker = createElementPicker(async (selector, name, editing) => {
+    if (!siteAuthorized) throw new Error("当前站点的访问权限已撤销。");
     const message = editing
       ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
       : { type: "save-site-selector", selector, name };
@@ -86,7 +94,7 @@
   }
 
   function automaticClickEnabled() {
-    return config.enabled && !config[pausedKey] && siteRules.some((rule) => !rule.paused);
+    return siteAuthorized && config.enabled && !config[pausedKey] && siteRules.some((rule) => !rule.paused);
   }
 
   function scan() {
@@ -131,22 +139,40 @@
       if (scanImmediately) scan();
     } else {
       observer.disconnect();
-      if (!config.enabled || config[pausedKey]) chrome.runtime.sendMessage({ type: "reset-badge" });
+      if (!config.enabled || !siteAuthorized || config[pausedKey]) chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 
   const observer = new MutationObserver(scheduleScan);
   window.navigation?.addEventListener("currententrychange", scheduleScan);
 
-  chrome.storage.sync.get(DEFAULTS).then(applyConfig);
+  const initialConfig = Promise.all([
+    chrome.storage.sync.get(DEFAULTS),
+    chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] })
+  ]).then(([settings, local]) => {
+    if (!authorizationChanged) siteAuthorized = local[AUTHORIZED_SITES_KEY].includes(accessPattern);
+    applyConfig({ ...settings, ...pendingSettings });
+    initialized = true;
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && Object.hasOwn(changes, AUTHORIZED_SITES_KEY)) {
+      authorizationChanged = true;
+      siteAuthorized = (changes[AUTHORIZED_SITES_KEY].newValue || []).includes(accessPattern);
+      if (!siteAuthorized) {
+        picker.stop();
+        ruleHighlight?.cancel();
+      }
+      if (initialized) applyConfig(config);
+      return;
+    }
     if (areaName !== "sync") return;
     const changedKeys = Object.keys(DEFAULTS).filter((key) => Object.hasOwn(changes, key));
     if (!changedKeys.length) return;
-    const changedConfig = { ...config };
+    const changedConfig = initialized ? { ...config } : pendingSettings;
     for (const key of changedKeys) {
       changedConfig[key] = changes[key].newValue ?? DEFAULTS[key];
     }
+    if (!initialized) return;
     if (changedKeys.length === 1 && changedKeys[0] === detailsKey) {
       const nextRules = getSiteRules(changedConfig, hostname);
       const executionChanged = siteRules.some((rule, index) => {
@@ -167,22 +193,28 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "get-status") {
-      sendResponse({
+      const status = () => ({
         enabled: config.enabled,
-        totalClicks
+        totalClicks,
+        authorized: siteAuthorized
       });
+      if (initialized) sendResponse(status());
+      else {
+        initialConfig.then(() => sendResponse(status()), () => sendResponse({ authorized: false }));
+        return true;
+      }
     }
     if (message.type === "scan-now") {
       scan();
       sendResponse({ totalClicks });
     }
-    if (message.type === "test-rule" && message.hostname === hostname) {
+    if (message.type === "test-rule" && siteAuthorized && message.hostname === hostname) {
       sendResponse(testRule(message.selector));
     }
     if (message.type === "start-picker") {
       const editing = message.selector && siteRules
         .find((rule) => rule.selector === message.selector && rule.id === message.expectedId);
-      if (!hostname || message.hostname !== hostname || (message.selector && !editing)) {
+      if (!siteAuthorized || !hostname || message.hostname !== hostname || (message.selector && !editing)) {
         sendResponse({ ok: false });
         return;
       }

@@ -7,6 +7,35 @@ const DEFAULTS = {
 
 let siteRuleUpdates = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
+let siteAccessUpdates = Promise.resolve();
+const SITE_SCRIPT_ID = "selector-clicker-sites";
+
+function updateSiteAccess(granted = []) {
+  const update = siteAccessUpdates.then(async () => {
+    const { [AUTHORIZED_SITES_KEY]: previous } = await chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] });
+    const exactOrigins = [...new Set([...previous, ...granted])].filter((pattern) =>
+      pattern && pattern === getSiteAccessPattern(pattern));
+    const checks = await Promise.all(exactOrigins.map((pattern) => chrome.permissions.contains({ origins: [pattern] })));
+    const matches = exactOrigins.filter((_pattern, index) => checks[index]).sort();
+    if (JSON.stringify(previous) !== JSON.stringify(matches)) {
+      // Revocation must also stop scripts already present in open documents.
+      await chrome.storage.local.set({ [AUTHORIZED_SITES_KEY]: matches });
+    }
+    const [current] = await chrome.scripting.getRegisteredContentScripts({ ids: [SITE_SCRIPT_ID] });
+    if (!matches.length) {
+      if (current) await chrome.scripting.unregisterContentScripts({ ids: [SITE_SCRIPT_ID] });
+    } else if (!current) {
+      await chrome.scripting.registerContentScripts([{
+        id: SITE_SCRIPT_ID, matches, js: SITE_SCRIPT_FILES, runAt: "document_idle", persistAcrossSessions: true
+      }]);
+    } else if (JSON.stringify([...current.matches].sort()) !== JSON.stringify(matches)) {
+      await chrome.scripting.updateContentScripts([{ id: SITE_SCRIPT_ID, matches }]);
+    }
+    return matches;
+  });
+  siteAccessUpdates = update.catch(() => {});
+  return update;
+}
 
 function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused, execution }) {
   const key = siteSelectorsKey(hostname);
@@ -144,9 +173,27 @@ function importRules(backup) {
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get(DEFAULTS);
   await chrome.storage.sync.set(existing);
+  await updateSiteAccess().catch(() => {});
 });
 
+chrome.runtime.onStartup.addListener(() => updateSiteAccess().catch(() => {}));
+chrome.permissions.onAdded.addListener(({ origins }) => updateSiteAccess(origins).catch(() => {}));
+chrome.permissions.onRemoved.addListener(() => updateSiteAccess().catch(() => {}));
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "authorize-site") {
+    if (sender.url !== chrome.runtime.getURL("popup.html")) return;
+    const { pattern } = message;
+    if (typeof pattern !== "string" || !pattern || pattern !== getSiteAccessPattern(pattern)) {
+      sendResponse({ ok: false });
+      return;
+    }
+    updateSiteAccess([pattern]).then(
+      (matches) => sendResponse({ ok: matches.includes(pattern) }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
+  }
   if (message.type === "import-rules") {
     if (sender.url !== chrome.runtime.getURL("rules.html")) return;
     importRules(message.backup).then(sendResponse, () => sendResponse({ ok: false }));

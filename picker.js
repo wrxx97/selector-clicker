@@ -1,5 +1,5 @@
-const PICKER_CONTROL = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [onclick]';
-const PICKER_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "aria-label", "name", "title"];
+var PICKER_CONTROL = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [onclick]';
+var PICKER_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "aria-label", "name", "title"];
 
 function getPickerTarget(hit) {
   const element = hit?.closest(PICKER_CONTROL) || hit;
@@ -37,7 +37,7 @@ function getPickerSelector(target) {
   return "";
 }
 
-const PICKER_STYLES = `
+var PICKER_STYLES = `
   :host {
     all: initial;
     position: fixed;
@@ -272,7 +272,7 @@ function createElementPicker(saveRule, resumeScan) {
       status.textContent = "正在保存规则…";
       try {
         await saveRule(selector, nameInput.value, editing);
-        finish(true);
+        if (!signal.aborted) finish(true);
       } catch (error) {
         status.textContent = error.message || "保存失败，请重试。";
         for (const button of [cancel, retry, save]) button.disabled = false;
@@ -307,8 +307,8 @@ function createElementPicker(saveRule, resumeScan) {
 
     resetSelection();
     document.documentElement.append(host);
-    session = { host, controller };
+    session = { host, controller, finish };
   }
 
-  return { start, get active() { return Boolean(session?.host.isConnected); } };
+  return { start, stop: () => session?.finish(), get active() { return Boolean(session?.host.isConnected); } };
 }

@@ -8,6 +8,10 @@ const vm = require("node:vm");
 function createWorker() {
   const store = new Map();
   const local = new Map();
+  const grantedOrigins = new Set();
+  let registered;
+  let permissionsAdded;
+  let permissionsRemoved;
   let onMessage;
   let context;
   function loadScript(file) {
@@ -36,9 +40,21 @@ function createWorker() {
       runtime: {
         getURL: (file) => `chrome-extension://test/${file}`,
         onInstalled: { addListener() {} },
+        onStartup: { addListener() {} },
         onMessage: { addListener(listener) { onMessage = listener; } }
       },
       tabs: { onUpdated: { addListener() {} } },
+      permissions: {
+        async contains({ origins }) { return origins.every((origin) => grantedOrigins.has(origin)); },
+        onAdded: { addListener(listener) { permissionsAdded = listener; } },
+        onRemoved: { addListener(listener) { permissionsRemoved = listener; } }
+      },
+      scripting: {
+        async getRegisteredContentScripts() { return registered ? [registered] : []; },
+        async registerContentScripts([script]) { registered = script; },
+        async updateContentScripts([script]) { registered = { ...registered, ...script }; },
+        async unregisterContentScripts() { registered = undefined; }
+      },
       storage: {
         sync: storageArea(store),
         local: storageArea(local)
@@ -49,6 +65,10 @@ function createWorker() {
   return {
     store,
     local,
+    grantedOrigins,
+    get registered() { return registered; },
+    onPermissionsAdded: (origins) => permissionsAdded({ origins }),
+    onPermissionsRemoved: () => permissionsRemoved(),
     send(message, sender = {}) {
       return new Promise((resolve) => {
         onMessage(message, sender, (response) => resolve(structuredClone(response)));
@@ -223,6 +243,28 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   const broken = { ...backup, sites: [add, invalid] };
   assert.deepEqual(await worker.send({ type: "import-rules", backup: broken }, sender), { ok: false });
   assert.equal(worker.store.has("siteSelectors:other.example"), false);
+});
+
+test("registers content scripts only for exact granted origins and removes them on revocation", async () => {
+  const worker = createWorker();
+  const sender = { url: "chrome-extension://test/popup.html" };
+  const site = "https://example.com/*";
+  const broad = "https://*/*";
+  const authorize = (pattern) => worker.send({ type: "authorize-site", pattern }, sender);
+  assert.deepEqual(await authorize(site), { ok: false });
+  worker.grantedOrigins.add(broad);
+  await worker.onPermissionsAdded([broad]);
+  assert.equal(worker.registered, undefined);
+  worker.grantedOrigins.add(site);
+  await worker.onPermissionsAdded([site]);
+  assert.deepEqual(await authorize(site), { ok: true });
+  assert.deepEqual([...worker.registered.matches], [site]);
+  assert.equal(worker.registered.runAt, "document_idle");
+  assert.deepEqual([...worker.local.get("authorizedSitePatterns")], [site]);
+  worker.grantedOrigins.delete(site);
+  await worker.onPermissionsRemoved();
+  assert.equal(worker.registered, undefined);
+  assert.deepEqual([...worker.local.get("authorizedSitePatterns")], []);
 });
 
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {

@@ -10,10 +10,12 @@ const elements = {
   scanNow: document.querySelector("#scan-now"),
   manageRules: document.querySelector("#manage-rules"),
   pickElement: document.querySelector("#pick-element"),
+  pickLabel: document.querySelector("#pick-label"),
   pickerStatus: document.querySelector("#picker-status"),
   siteRules: document.querySelector("#site-rules"),
   siteRuleList: document.querySelector("#site-rule-list"),
   toggleSitePause: document.querySelector("#toggle-site-pause"),
+  authorizeSite: document.querySelector("#authorize-site"),
   ruleCount: document.querySelector("#rule-count"),
   emptyRules: document.querySelector("#empty-rules"),
   settingsStatus: document.querySelector("#settings-status"),
@@ -26,6 +28,8 @@ const elements = {
 
 let activeTab;
 let activeHostname;
+let accessPattern;
+let hasSiteAccess = false;
 let pageClicks;
 let sitePaused = false;
 
@@ -70,19 +74,54 @@ async function getCurrentTab() {
 }
 
 async function refreshPageStatus() {
-  if (activeTab?.id == null || !activeHostname) {
+  if (activeTab?.id == null || !accessPattern) {
     setFeedback(elements.pickerStatus, "请在普通网页上选取元素。");
     return;
   }
+  elements.pickElement.disabled = false;
+  elements.scanNow.disabled = true;
   try {
-    const response = await chrome.tabs.sendMessage(activeTab.id, { type: "get-status" });
+    const [local, granted] = await Promise.all([
+      chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] }),
+      chrome.permissions.contains({ origins: [accessPattern] })
+    ]);
+    hasSiteAccess = granted && local[AUTHORIZED_SITES_KEY].includes(accessPattern);
+    elements.pickLabel.textContent = hasSiteAccess ? "在页面上选取元素" : "授权并选取元素";
+    elements.authorizeSite.hidden = hasSiteAccess;
+    if (!hasSiteAccess) {
+      setFeedback(elements.pickerStatus, "授权后可在当前站点选取元素和运行规则。");
+      return;
+    }
+    const response = await connectToPage();
     updateStatus(response.enabled, response.totalClicks);
-    elements.pickElement.disabled = false;
     elements.scanNow.disabled = false;
   } catch {
     elements.emptyRules.hidden = true;
     setFeedback(elements.pickerStatus, "无法连接当前网页。重新加载扩展后，请刷新网页。", true);
   }
+}
+
+async function connectToPage() {
+  const ready = { type: "get-status" };
+  try {
+    const status = await chrome.tabs.sendMessage(activeTab.id, ready);
+    if (status?.authorized) return status;
+  } catch {
+    // Existing tabs that predate authorization need one injection.
+  }
+  await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: SITE_SCRIPT_FILES });
+  const status = await chrome.tabs.sendMessage(activeTab.id, ready);
+  if (!status?.authorized) throw new Error("Site not authorized");
+  return status;
+}
+
+async function requestSiteAccess() {
+  const granted = await chrome.permissions.request({ origins: [accessPattern] });
+  if (!granted) return false;
+  const result = await chrome.runtime.sendMessage({ type: "authorize-site", pattern: accessPattern });
+  if (!result?.ok) throw new Error("Could not register site scripts");
+  hasSiteAccess = true;
+  return true;
 }
 
 function renderSiteRules(rules) {
@@ -147,6 +186,11 @@ async function testSiteRule(selector, button) {
   };
   button.disabled = true;
   try {
+    if (!hasSiteAccess) {
+      setFeedback(elements.pickerStatus, "请先授权当前站点，再测试规则。");
+      return;
+    }
+    await connectToPage();
     const result = await chrome.tabs.sendMessage(activeTab.id, { type: "test-rule", hostname: activeHostname, selector });
     if (!result) throw new Error("Page unavailable");
     const text = result.status === "ambiguous" ? `匹配到 ${result.count} 个元素，请重新选取。` : messages[result.status];
@@ -207,6 +251,7 @@ async function initialize() {
   ]);
   activeTab = tab;
   activeHostname = getSiteHostname(tab?.url);
+  accessPattern = getSiteAccessPattern(tab?.url);
   elements.enabled.checked = settings.enabled;
   elements.cooldown.value = settings.cooldown;
   elements.siteName.textContent = activeHostname || "当前页面不可用";
@@ -230,6 +275,12 @@ async function startPicker(button, rule = {}) {
   button.disabled = true;
   setFeedback(elements.pickerStatus, "");
   try {
+    if (!hasSiteAccess && !await requestSiteAccess()) {
+      setFeedback(elements.pickerStatus, "未授予当前站点访问权限。");
+      button.disabled = false;
+      return;
+    }
+    await connectToPage();
     const response = await chrome.tabs.sendMessage(activeTab.id, { type: "start-picker", hostname: activeHostname, ...rule });
     if (!response?.ok) throw new Error("Could not start picker");
     window.close();
@@ -240,6 +291,21 @@ async function startPicker(button, rule = {}) {
 }
 
 elements.pickElement.addEventListener("click", () => startPicker(elements.pickElement));
+elements.authorizeSite.addEventListener("click", async () => {
+  elements.authorizeSite.disabled = true;
+  try {
+    if (await requestSiteAccess()) {
+      setFeedback(elements.pickerStatus, "已授权当前站点。");
+      await refreshPageStatus();
+    } else {
+      setFeedback(elements.pickerStatus, "未授予当前站点访问权限。");
+    }
+  } catch {
+    setFeedback(elements.pickerStatus, "授权当前站点失败，请重试。", true);
+  } finally {
+    elements.authorizeSite.disabled = false;
+  }
+});
 elements.toggleSitePause.addEventListener("click", () => changePause(elements.toggleSitePause, { paused: !sitePaused }));
 
 elements.save.addEventListener("click", () => saveSettings(true));

@@ -4,7 +4,9 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyAaTOT8Q0ytoMEGLYMzUsIttJ+g9quP5EsnPnomLRMDVVvDh1ei/dj4pxPHMe+8w4aKxjC5R9v/gjS5+HzzrEZ8M3BYcwwslUXM3Qzw/ODPnsNBXInQmE5lsYnPo7tdmkq464uzO6SMSHEBC6saZBxL0Q5yg6Qr5LUGgYy5XY6Zhr6PsG82fJdnBzlS/rQP7CcAMMr7TIxQ5ooir+IWml2wP7EO1rDZbh1OrWOH+yKytueIDTvnVQ8SVJFpiVBwLNQXywu1/7f/Hx7KVxd8wtwPIqtLF6AZw82oHiAiYmcztxMGnqPk6qq//ZBCmkAYTeyEtVmvZoQE8XLXaRIpZ7QIDAQAB",
   "version": "1.0.1",
   "description": "Pick page elements to click automatically on each site.",
-  "permissions": ["storage", "tabs"],
+  "minimum_chrome_version": "96",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -26,12 +28,5 @@
   "options_ui": {
     "page": "rules.html",
     "open_in_tab": true
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["site-rules.js", "picker.js", "content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }

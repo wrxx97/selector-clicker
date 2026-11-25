@@ -33,11 +33,12 @@
         </div>
         <button id="pick-element" class="pick-element" type="button" disabled>
           <span class="target" aria-hidden="true"></span>
-          在页面上选取元素
+          <span id="pick-label">在页面上选取元素</span>
         </button>
         <p id="picker-status" class="feedback" role="status"></p>
         <div id="site-rules" class="site-rules" hidden>
           <button id="toggle-site-pause" class="button-outline" type="button" hidden></button>
+          <button id="authorize-site" class="button-outline" type="button" hidden>授权当前站点</button>
           <ul id="site-rule-list" aria-label="站点规则"></ul>
         </div>
         <p id="empty-rules" class="empty-rules" hidden>选取后，规则只在此网站生效。</p>
