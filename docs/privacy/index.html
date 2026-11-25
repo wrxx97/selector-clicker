@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="了解 Selector Clicker 如何处理网页元素、保存站点规则与设置，以及在本机记录点击统计。">
+  <title>隐私声明 · Selector Clicker</title>
+  <link rel="icon" type="image/png" href="../assets/icon.png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+  <header class="site-header">
+    <div class="shell nav">
+      <a class="brand" href="../">
+        <img src="../assets/icon.png" alt="" width="36" height="36">
+        <span>Selector Clicker</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="../">插件介绍</a>
+        <a href="./" aria-current="page">隐私声明</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell policy" id="main">
+    <header class="policy-header">
+      <h1>隐私声明</h1>
+      <p class="policy-date">更新于 <time datetime="2026-11-25">2026 年 11 月 25 日</time></p>
+      <p>本声明适用于 Chrome 和 Microsoft Edge 上的 Selector Clicker 扩展及本介绍网站。</p>
+    </header>
+    <div class="policy-layout">
+      <nav class="policy-nav" aria-label="声明目录">
+        <a href="#data">处理哪些数据</a>
+        <a href="#sync">存储、同步与共享</a>
+        <a href="#control">如何管理和删除</a>
+        <a href="#hosting">网站托管</a>
+        <a href="#contact">联系我们</a>
+      </nav>
+      <div class="policy-body">
+        <section id="data" aria-labelledby="data-title">
+          <h2 id="data-title">处理哪些数据</h2>
+          <dl class="data-list">
+            <div>
+              <dt>当前标签页与页面元素</dt>
+              <dd>扩展读取当前标签页的网址，从中取得主机名，用来查找该站点的规则。点选元素时，扩展在浏览器内读取元素的结构及部分属性，如 ID、类名和标签属性，并据此生成 CSS 选择器。运行规则时，扩展在网页内查找匹配元素并检查它是否可见和可用。</dd>
+            </div>
+            <div>
+              <dt>站点规则与设置</dt>
+              <dd>保存规则时，扩展记录该网站的主机名、CSS 选择器、规则标识，以及你填写的可选备注。扩展还保存自动点击开关和点击冷却时间。选择器可能包含用于定位元素的网页属性值。</dd>
+            </div>
+            <div>
+              <dt>点击统计</dt>
+              <dd>扩展在当前页面显示本页次数，并在浏览器本地按站点和规则累计点击次数，同时保存本机累计总数。</dd>
+            </div>
+          </dl>
+          <p>扩展只用这些数据来选取元素、执行和管理规则、显示统计。扩展不会保存完整浏览记录、网页正文、密码或表单输入值。</p>
+        </section>
+
+        <section id="sync" aria-labelledby="sync-title">
+          <h2 id="sync-title">存储、同步与共享</h2>
+          <p>规则、备注和设置保存在浏览器的扩展同步存储中。启用浏览器的扩展同步时，这些数据可由浏览器提供方（Chrome 的 Google 或 Edge 的 Microsoft）在你的同一浏览器账号下同步。点击统计始终保存在当前浏览器的本地扩展存储中。</p>
+          <p>扩展无需注册 Selector Clicker 账号。开发者不运营接收这些数据的服务器，也不会接收、出售数据，或将其共享给广告商或分析服务。扩展不含广告或第三方分析代码。</p>
+          <p class="reference-links">
+            <a href="https://developer.chrome.com/docs/extensions/reference/api/storage#storage-areas">Chrome 扩展存储说明 ↗</a>
+            <a href="https://support.microsoft.com/en-us/edge/change-and-customize-sync-settings-in-microsoft-edge">Microsoft Edge 同步说明 ↗</a>
+          </p>
+        </section>
+
+        <section id="control" aria-labelledby="control-title">
+          <h2 id="control-title">如何管理和删除</h2>
+          <ul>
+            <li>在扩展的「管理规则」页面可编辑或移除站点规则及备注。移除规则后，该规则过去的点击仍计入本机累计次数。</li>
+            <li>可在浏览器同步设置中关闭扩展同步。要删除已同步的规则，可在同步开启时先在扩展内移除它们。</li>
+            <li>从浏览器卸载扩展会清除当前浏览器中扩展的本地存储，包括点击统计。其他设备或同步数据的保留由浏览器账号与同步设置管理。</li>
+          </ul>
+        </section>
+
+        <section id="hosting" aria-labelledby="hosting-title">
+          <h2 id="hosting-title">网站托管</h2>
+          <p>本网站由 GitHub Pages 托管，网页不设置 Cookie，也未加入访问分析脚本。GitHub 可能为安全目的记录访问者的 IP 地址。</p>
+          <p class="reference-links"><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub 隐私声明 ↗</a></p>
+        </section>
+
+        <section id="contact" aria-labelledby="contact-title">
+          <h2 id="contact-title">联系我们</h2>
+          <p>如对本声明或扩展的数据处理有疑问，可在 GitHub 提交问题。请勿在公开问题中附上密码、账号信息或含有个人资料的规则。</p>
+          <p class="reference-links"><a href="https://github.com/wrxx97/selector-clicker/issues">GitHub 问题反馈 ↗</a></p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer">
+      <span>Selector Clicker</span>
+      <nav aria-label="页脚导航">
+        <a href="../">插件介绍</a>
+        <a href="https://github.com/wrxx97/selector-clicker">GitHub 源码 ↗</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

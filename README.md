@@ -6,6 +6,11 @@
 
 <p align="center">在 Chrome 和 Microsoft Edge 上点选网页元素，自动处理反复关闭弹窗、遮罩等点击操作。</p>
 
+<p align="center">
+  <a href="https://wrxx97.github.io/selector-clicker/">插件介绍</a> ·
+  <a href="https://wrxx97.github.io/selector-clicker/privacy/">隐私声明</a>
+</p>
+
 ## 主要特性
 
 | 特性 | 说明 |
