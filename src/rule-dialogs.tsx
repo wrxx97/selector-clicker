@@ -1,13 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentProps, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Toast, useToast } from "@/components/ui/toast";
-import { previewRuleImport, validateSelector } from "@/lib/backup";
+import { Toast, useToast, type ToastFeedback } from "@/components/ui/toast";
+import { previewRuleImport, validateSelector, type BackupPreview } from "@/lib/backup";
 import { RULE_NAME_MAX_LENGTH, getExecutionOptions, normalizeSiteHostname, send } from "@/lib/extension";
+import type { Rule, RuleSite, WorkerRequest } from "@/lib/extension-types";
 
-function RuleDialogContent({ children, feedback, dismiss, ...props }) {
+type RuleAction = { kind: "rule"; hostname: string; rule: Rule; remove: boolean };
+type SiteAction = { kind: "site"; site: RuleSite; remove: boolean };
+type BackupSource = { type: "text"; preview?: never } | { type: "file"; preview: BackupPreview };
+
+export type ManagerDialog = RuleAction | SiteAction | { kind: "backup"; source: BackupSource };
+export type OpenManagerDialog = (dialog: ManagerDialog, trigger: HTMLElement | null) => void;
+
+interface DialogCallbacks {
+  onClose(): void;
+  onSaved(message: string): Promise<void>;
+  returnFocus(event: Event): void;
+}
+
+interface RuleDialogContentProps extends Omit<ComponentProps<typeof DialogContent>, "className" | "showCloseButton"> {
+  feedback: ToastFeedback | null;
+  dismiss(feedback: ToastFeedback): void;
+}
+
+function RuleDialogContent({ children, feedback, dismiss, ...props }: RuleDialogContentProps) {
   return <DialogContent {...props} className="gap-0 p-0 sm:max-w-lg" showCloseButton={false}>
     <div className="grid max-h-[calc(100dvh-2rem)] gap-4 overflow-auto p-5">
       {children}
@@ -16,41 +35,44 @@ function RuleDialogContent({ children, feedback, dismiss, ...props }) {
   </DialogContent>;
 }
 
-export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
+export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCallbacks & { action: RuleAction }) {
   const { hostname, rule, remove } = action;
   const [draft, setDraft] = useState({
     name: rule.name, selector: rule.selector, path: rule.pathPrefix, limit: rule.maxClicks || ""
   });
   const { feedback, setFeedback, dismiss } = useToast();
-  const reportError = (text) => setFeedback({ text, error: true });
+  const reportError = (text: string) => setFeedback({ text, error: true });
   const [saving, setSaving] = useState(false);
-  const nameInput = useRef(null);
-  const cancelButton = useRef(null);
-  const update = (key) => (event) => setDraft((previous) => ({ ...previous, [key]: event.target.value }));
+  const nameInput = useRef<HTMLInputElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const update = (key: keyof typeof draft) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { value } = event.target;
+    setDraft((previous) => ({ ...previous, [key]: value }));
+  };
 
-  async function submit(event) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
-    const execution = event.currentTarget.checkValidity() ? getExecutionOptions(draft.path, Number(draft.limit)) : null;
-    const invalid = !remove && (validateSelector(draft.selector) || (!execution &&
-      "请输入以 / 开头的路径（不含查询参数）和非负整数点击次数。"));
-    if (invalid) {
-      reportError(invalid);
-      return;
+    const target = { hostname, selector: rule.selector, expectedId: rule.id };
+    let message: WorkerRequest = { type: "remove-site-selector", ...target };
+    if (!remove) {
+      const execution = event.currentTarget.checkValidity()
+        ? getExecutionOptions(draft.path, Number(draft.limit)) : null;
+      const invalid = validateSelector(draft.selector);
+      if (invalid || !execution) {
+        reportError(invalid || "请输入以 / 开头的路径（不含查询参数）和非负整数点击次数。");
+        return;
+      }
+      message = { type: "edit-site-selector", ...target, replacement: draft.selector, name: draft.name, ...execution };
     }
     setSaving(true);
     setFeedback(null);
     const failure = remove ? "移除规则失败，请重试。" : "保存修改失败，请重试。";
     try {
-      const message = {
-        type: remove ? "remove-site-selector" : "edit-site-selector",
-        hostname, selector: rule.selector, expectedId: rule.id
-      };
-      if (!remove) Object.assign(message, { replacement: draft.selector, name: draft.name, ...execution });
       const result = await send(message);
       if (!result?.ok) {
-        const errors = { duplicate: "此网站已有相同的选择器。", missing: "这条规则已变更，请返回列表重新选择。" };
-        reportError(errors[result?.reason] || failure);
+        const errors: Record<string, string> = { duplicate: "此网站已有相同的选择器。", missing: "这条规则已变更，请返回列表重新选择。" };
+        reportError(errors[result?.reason ?? ""] || failure);
         return;
       }
       await onSaved(remove ? "已移除规则。" : "已保存修改。");
@@ -105,16 +127,16 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
   </Dialog>;
 }
 
-export function SiteDialog({ action, onClose, onSaved, returnFocus }) {
+export function SiteDialog({ action, onClose, onSaved, returnFocus }: DialogCallbacks & { action: SiteAction }) {
   const { site, remove } = action;
   const { hostname, rules } = site;
   const [destination, setDestination] = useState(hostname);
   const [saving, setSaving] = useState(false);
   const { feedback, setFeedback, dismiss } = useToast();
-  const input = useRef(null);
-  const cancel = useRef(null);
+  const input = useRef<HTMLInputElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
 
-  async function submit(event) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
     const target = normalizeSiteHostname(destination);
@@ -131,11 +153,11 @@ export function SiteDialog({ action, onClose, onSaved, returnFocus }) {
         ? { ...request, type: "remove-site-rules" }
         : { ...request, type: "rename-site", destination: target });
       if (!result?.ok) {
-        const errors = {
+        const errors: Record<string, string> = {
           duplicate: "目标站点已有规则，请使用其他主机名。",
           changed: "站点规则已变更，请关闭窗口后重新操作。"
         };
-        setFeedback({ text: errors[result?.reason] || failure, error: true });
+        setFeedback({ text: errors[result?.reason ?? ""] || failure, error: true });
         return;
       }
       await onSaved(remove ? "已删除该站点的全部规则。" : "已更新站点主机名。");
@@ -172,15 +194,15 @@ export function SiteDialog({ action, onClose, onSaved, returnFocus }) {
   </Dialog>;
 }
 
-export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
+export function BackupDialog({ source, onClose, onSaved, returnFocus }: DialogCallbacks & { source: BackupSource }) {
   const [draft, setDraft] = useState("");
-  const [preview, setPreview] = useState(source.preview);
+  const [preview, setPreview] = useState<BackupPreview | null>(source.preview ?? null);
   const [busy, setBusy] = useState(false);
   const { feedback, setFeedback, dismiss } = useToast();
-  const reportError = (text) => setFeedback({ text, error: true });
-  const input = useRef(null);
-  const primary = useRef(null);
-  const cancel = useRef(null);
+  const reportError = (text: string) => setFeedback({ text, error: true });
+  const input = useRef<HTMLTextAreaElement>(null);
+  const primary = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
 
   function focusCurrent() {
     (preview ? (preview.added ? primary : cancel) : input).current?.focus();
@@ -188,7 +210,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
 
   useEffect(focusCurrent, [preview]);
 
-  async function submit(event) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || (preview && !preview.added)) return;
     setBusy(true);
@@ -202,7 +224,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
       if (!result?.ok) throw new Error("Could not import rules");
       await onSaved(`已导入 ${result.addedCount} 条规则，跳过 ${result.duplicateCount} 条重复规则。`);
     } catch (failure) {
-      reportError(preview ? "导入失败，请检查浏览器同步存储空间后重试。" : failure.message);
+      reportError(preview || !(failure instanceof Error) ? "导入失败，请检查浏览器同步存储空间后重试。" : failure.message);
     } finally {
       setBusy(false);
     }
@@ -233,7 +255,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
           {preview && source.type === "text" && <Button type="button" variant="ghost"
             disabled={busy} onClick={() => { setPreview(null); setFeedback(null); }}>返回修改</Button>}
           <Button ref={cancel} type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button>
-          <Button ref={primary} id="confirm-import" type="submit" disabled={busy || (preview && !preview.added)}>
+          <Button ref={primary} id="confirm-import" type="submit" disabled={busy || (preview !== null && !preview.added)}>
             {preview ? "导入新增规则" : "预览导入"}
           </Button>
         </div>

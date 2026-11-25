@@ -1,35 +1,49 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const crypto = require("node:crypto");
-const path = require("node:path");
-const test = require("node:test");
-const vm = require("node:vm");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import crypto from "node:crypto";
+import test from "node:test";
+import vm from "node:vm";
+import type { Rule, RuleBackup, StorageChanges, StoredValues, WorkerResponse } from "../src/lib/extension-types";
+
+type WorkerMessage = { type: string; [key: string]: unknown };
+type WorkerSender = { url?: string; tab?: { id: number } };
+type WorkerListener = (message: WorkerMessage, sender: WorkerSender, reply: (value: WorkerResponse) => void) => void;
+type StorageListener = (changes: StorageChanges, area: string) => Promise<void> | undefined;
+type PermissionListener = (permissions: { origins?: string[] }) => Promise<unknown>;
+type SavedRuleDetails = Record<string, Pick<Rule, "id"> & Partial<Omit<Rule, "id" | "selector">>>;
+
+class FixtureStorage extends Map<string, unknown> {
+  read<Value>(key: string): Value {
+    assert.ok(this.has(key), `Missing storage value for ${key}`);
+    return this.get(key) as Value;
+  }
+}
 
 function createWorker(now = Date.now) {
-  const store = new Map();
-  const local = new Map();
-  const grantedOrigins = new Set();
-  let registered;
-  let permissionsAdded;
-  let permissionsRemoved;
-  let onMessage;
-  let storageChanged;
-  let lastIcon;
-  let context;
-  function loadScript(file) {
-    const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+  const store = new FixtureStorage();
+  const local = new FixtureStorage();
+  const grantedOrigins = new Set<string>();
+  let registered: chrome.scripting.RegisteredContentScript | undefined;
+  let permissionsAdded!: PermissionListener;
+  let permissionsRemoved!: () => Promise<unknown>;
+  let onMessage!: WorkerListener;
+  let storageChanged!: StorageListener;
+  let lastIcon: Record<number, string> | undefined;
+  let context: vm.Context;
+  function loadScript(file: string) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     vm.runInContext(source, context, { filename: file });
   }
-  function storageArea(values) {
+  function storageArea(values: FixtureStorage) {
     return {
-      async get(defaults) {
+      async get(defaults: StoredValues) {
         return Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, values.get(key) ?? value]));
       },
-      async set(entries) {
+      async set(entries: StoredValues) {
         for (const [key, value] of Object.entries(entries)) values.set(key, value);
       },
-      async remove(keys) {
-        for (const key of [].concat(keys)) values.delete(key);
+      async remove(keys: string | string[]) {
+        for (const key of typeof keys === "string" ? [keys] : keys) values.delete(key);
       }
     };
   }
@@ -41,30 +55,30 @@ function createWorker(now = Date.now) {
     chrome: {
       action: {
         setBadgeText() {}, setBadgeBackgroundColor() {},
-        async setIcon({ path }) { lastIcon = structuredClone(path); }
+        async setIcon({ path }: { path: Record<number, string> }) { lastIcon = structuredClone(path); }
       },
       runtime: {
-        getURL: (file) => `chrome-extension://test/${file}`,
+        getURL: (file: string) => `chrome-extension://test/${file}`,
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
-        onMessage: { addListener(listener) { onMessage = listener; } }
+        onMessage: { addListener(listener: WorkerListener) { onMessage = listener; } }
       },
       tabs: { onUpdated: { addListener() {} } },
       permissions: {
-        async contains({ origins }) { return origins.every((origin) => grantedOrigins.has(origin)); },
-        onAdded: { addListener(listener) { permissionsAdded = listener; } },
-        onRemoved: { addListener(listener) { permissionsRemoved = listener; } }
+        async contains({ origins }: { origins: string[] }) { return origins.every((origin) => grantedOrigins.has(origin)); },
+        onAdded: { addListener(listener: PermissionListener) { permissionsAdded = listener; } },
+        onRemoved: { addListener(listener: () => Promise<unknown>) { permissionsRemoved = listener; } }
       },
       scripting: {
         async getRegisteredContentScripts() { return registered ? [registered] : []; },
-        async registerContentScripts([script]) { registered = script; },
-        async updateContentScripts([script]) { registered = { ...registered, ...script }; },
+        async registerContentScripts([script]: chrome.scripting.RegisteredContentScript[]) { registered = script; },
+        async updateContentScripts([script]: chrome.scripting.RegisteredContentScript[]) { registered = { ...registered, ...script }; },
         async unregisterContentScripts() { registered = undefined; }
       },
       storage: {
         sync: storageArea(store),
         local: storageArea(local),
-        onChanged: { addListener(listener) { storageChanged = listener; } }
+        onChanged: { addListener(listener: StorageListener) { storageChanged = listener; } }
       }
     }
   });
@@ -75,18 +89,18 @@ function createWorker(now = Date.now) {
     grantedOrigins,
     get registered() { return registered; },
     get lastIcon() { return lastIcon; },
-    changeTheme(theme) {
+    changeTheme(theme: string) {
       store.set("uiTheme", theme);
       return storageChanged({ uiTheme: { newValue: theme } }, "sync");
     },
-    onPermissionsAdded: (origins) => permissionsAdded({ origins }),
+    onPermissionsAdded: (origins: string[]) => permissionsAdded({ origins }),
     onPermissionsRemoved: () => permissionsRemoved(),
     backup() {
-      const create = vm.runInContext("(stored) => createRuleBackup(getRuleSites(stored))", context);
+      const create = vm.runInContext("(stored) => createRuleBackup(getRuleSites(stored))", context) as (stored: StoredValues) => RuleBackup;
       return structuredClone(create(Object.fromEntries([...store, ...local])));
     },
-    send(message, sender = {}) {
-      return new Promise((resolve) => {
+    send(message: WorkerMessage, sender: WorkerSender = {}) {
+      return new Promise<WorkerResponse>((resolve) => {
         onMessage(message, sender, (response) => resolve(structuredClone(response)));
       });
     }
@@ -117,7 +131,7 @@ test("edits a site without overwriting its destination and keeps its rule data a
   worker.store.set("siteSelectors:taken.example", ["#other"]);
   worker.local.set("siteClickCounts:target.example", { "rule:close": 50 });
   await worker.send({ type: "click-record", ruleIds: ["close"] }, { url: "https://source.example/", tab: { id: 1 } });
-  const lastClick = worker.local.get("siteLastClickTimes:source.example")["rule:close"];
+  const lastClick = worker.local.read<Record<string, number>>("siteLastClickTimes:source.example")["rule:close"];
   const move = { type: "rename-site", hostname, destination, expectedRuleIds: ["close"] };
 
   assert.deepEqual(await worker.send(move, { url: "https://source.example/" }), { ok: false });
@@ -128,8 +142,8 @@ test("edits a site without overwriting its destination and keeps its rule data a
   assert.deepEqual(worker.backup().sites.map(({ hostname: site }) => site), ["taken.example", destination]);
   assert.deepEqual(structuredClone(worker.store.get("siteRuleDetails:target.example")), details);
   assert.equal(worker.store.get("sitePaused:target.example"), true);
-  assert.equal(worker.local.get("siteClickCounts:target.example")["rule:close"], 1);
-  assert.equal(worker.local.get("siteLastClickTimes:target.example")["rule:close"], lastClick);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:target.example")["rule:close"], 1);
+  assert.equal(worker.local.read<Record<string, number>>("siteLastClickTimes:target.example")["rule:close"], lastClick);
   assert.equal(worker.local.get("totalClickCount"), 1);
 });
 
@@ -155,7 +169,7 @@ test("deletes only the confirmed site's rules and refuses a stale confirmation",
 
 test("concurrent saves keep both rules and deduplicate a selector on the same hostname", async () => {
   const worker = createWorker();
-  const save = (selector, url) => worker.send({ type: "save-site-selector", selector }, { url });
+  const save = (selector: string, url: string) => worker.send({ type: "save-site-selector", selector }, { url });
   await Promise.all([
     save("#ad-close", "https://example.com/one"),
     save("#dialog-close", "https://example.com/two"),
@@ -163,13 +177,13 @@ test("concurrent saves keep both rules and deduplicate a selector on the same ho
     save("#ad-close", "https://sub.example.com/")
   ]);
 
-  assert.deepEqual([...worker.store.get("siteSelectors:example.com")], ["#ad-close", "#dialog-close"]);
-  assert.deepEqual([...worker.store.get("siteSelectors:sub.example.com")], ["#ad-close"]);
+  assert.deepEqual([...worker.store.read<string[]>("siteSelectors:example.com")], ["#ad-close", "#dialog-close"]);
+  assert.deepEqual([...worker.store.read<string[]>("siteSelectors:sub.example.com")], ["#ad-close"]);
 });
 
 test("removing the last rule only removes that hostname's storage key", async () => {
   const worker = createWorker();
-  const save = (url) => worker.send({ type: "save-site-selector", selector: "#close" }, { url });
+  const save = (url: string) => worker.send({ type: "save-site-selector", selector: "#close" }, { url });
   await save("https://example.com/");
   await save("https://other.example/");
   assert.deepEqual(await save("file:///example.html"), { ok: false });
@@ -187,7 +201,7 @@ test("removing the last rule only removes that hostname's storage key", async ()
 
 test("editing a selector keeps its position and changes only the selected site", async () => {
   const worker = createWorker();
-  const save = (selector, hostname) => worker.send({
+  const save = (selector: string, hostname: string) => worker.send({
     type: "save-site-selector",
     selector
   }, { url: `https://${hostname}/` });
@@ -206,8 +220,8 @@ test("editing a selector keeps its position and changes only the selected site",
   ]);
 
   assert.deepEqual(edit, { ok: true, selectors: ["#new-close", "#dismiss"] });
-  assert.deepEqual([...worker.store.get("siteSelectors:example.com")], ["#new-close", "#dismiss", "#third"]);
-  assert.deepEqual([...worker.store.get("siteSelectors:other.example")], ["#close"]);
+  assert.deepEqual([...worker.store.read<string[]>("siteSelectors:example.com")], ["#new-close", "#dismiss", "#third"]);
+  assert.deepEqual([...worker.store.read<string[]>("siteSelectors:other.example")], ["#close"]);
 });
 
 test("an edit does not overwrite a duplicate or recreate a rule removed elsewhere", async () => {
@@ -215,7 +229,7 @@ test("an edit does not overwrite a duplicate or recreate a rule removed elsewher
   const hostname = "example.com";
   const key = "siteSelectors:example.com";
   worker.store.set(key, ["#close", "#dismiss"]);
-  const edit = (selector, replacement) => worker.send({
+  const edit = (selector: string, replacement: string) => worker.send({
     type: "edit-site-selector",
     hostname,
     selector,
@@ -231,16 +245,16 @@ test("an edit does not overwrite a duplicate or recreate a rule removed elsewher
 test("saving an optional name keeps the existing selector array and stable rule identity", async () => {
   const worker = createWorker();
   const sender = { url: "https://example.com/" };
-  const save = (name) => worker.send({ type: "save-site-selector", selector: "#close", name }, sender);
+  const save = (name: string) => worker.send({ type: "save-site-selector", selector: "#close", name }, sender);
   const metaKey = "siteRuleDetails:example.com";
 
   await save("  关闭弹窗  ");
-  const id = worker.store.get(metaKey)["selector:#close"].id;
+  const id = worker.store.read<SavedRuleDetails>(metaKey)["selector:#close"].id;
   await save("");
-  assert.deepEqual([...worker.store.get("siteSelectors:example.com")], ["#close"]);
-  assert.equal(worker.store.get(metaKey)["selector:#close"].name, "关闭弹窗");
+  assert.deepEqual([...worker.store.read<string[]>("siteSelectors:example.com")], ["#close"]);
+  assert.equal(worker.store.read<SavedRuleDetails>(metaKey)["selector:#close"].name, "关闭弹窗");
   await save("关闭通知");
-  assert.deepEqual(structuredClone(worker.store.get(metaKey)["selector:#close"]), { id, name: "关闭通知" });
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(metaKey)["selector:#close"]), { id, name: "关闭通知" });
 });
 
 test("re-picking is scoped to the sender site and refuses to replace a recreated rule", async () => {
@@ -248,11 +262,11 @@ test("re-picking is scoped to the sender site and refuses to replace a recreated
   const sender = { url: "https://example.com/" };
   const detailsKey = "siteRuleDetails:example.com";
   await worker.send({ type: "save-site-selector", selector: "#close", name: "Close" }, sender);
-  const { id } = worker.store.get(detailsKey)["selector:#close"];
+  const { id } = worker.store.read<SavedRuleDetails>(detailsKey)["selector:#close"];
   const request = { type: "replace-picked-selector", selector: "#close", replacement: "#new", expectedId: id };
   assert.deepEqual(await worker.send(request, { url: "https://other.example/" }), { ok: false, reason: "missing" });
   assert.deepEqual(await worker.send(request, sender), { ok: true, selectors: ["#new"] });
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#new"]), { id, name: "Close" });
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#new"]), { id, name: "Close" });
   await worker.send({ type: "save-site-selector", selector: "#close" }, sender);
   assert.deepEqual(await worker.send(request, sender), { ok: false, reason: "missing" });
 });
@@ -262,16 +276,20 @@ test("batch pause updates each rule and allows individual and batch resume", asy
   const hostname = "example.com";
   const sender = { url: `https://${hostname}/` };
   const detailsKey = "siteRuleDetails:example.com";
-  const save = (selector, name, source = sender) => worker.send({ type: "save-site-selector", selector, name }, source);
-  const pauseAll = (paused) => worker.send({ type: "set-site-paused", hostname, paused });
-  const rules = () => worker.backup().sites.find((site) => site.hostname === hostname).rules;
+  const save = (selector: string, name: string, source = sender) => worker.send({ type: "save-site-selector", selector, name }, source);
+  const pauseAll = (paused: boolean) => worker.send({ type: "set-site-paused", hostname, paused });
+  const rules = () => {
+    const site = worker.backup().sites.find((site) => site.hostname === hostname);
+    assert.ok(site);
+    return site.rules;
+  };
   const states = () => rules().map((rule) => rule.paused);
 
   await save("#close", "Close");
   await save("#dismiss", "Dismiss");
   await save("#close", "Other", { url: "https://other.example/" });
-  const { id } = worker.store.get(detailsKey)["selector:#close"];
-  const pauseRule = (paused) => worker.send({
+  const { id } = worker.store.read<SavedRuleDetails>(detailsKey)["selector:#close"];
+  const pauseRule = (paused: boolean) => worker.send({
     type: "set-rule-paused", hostname, selector: "#close", expectedId: id, paused
   });
 
@@ -287,7 +305,7 @@ test("batch pause updates each rule and allows individual and batch resume", asy
   assert.equal(worker.backup().sites[0].paused, false);
   await pauseAll(true);
   await worker.send({ type: "edit-site-selector", hostname, selector: "#close", replacement: "#other" });
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), { id, name: "Close", paused: true });
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#other"]), { id, name: "Close", paused: true });
   await save("#new", "New");
   assert.deepEqual(states(), [true, true, false]);
   await pauseAll(false);
@@ -310,7 +328,7 @@ test("converts a legacy site pause without losing IDs, execution conditions, or 
   assert.equal(result.ok, true);
   assert.equal(worker.store.get("sitePaused:example.com"), false);
   assert.deepEqual(worker.backup().sites[0].rules.map((rule) => rule.paused), [false, true]);
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), {
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#other"]), {
     id: "other", name: "Other", maxClicks: 3, paused: true
   });
 });
@@ -321,14 +339,14 @@ test("validates execution options and retains them when a target is re-picked", 
   const sender = { url: `https://${hostname}/` };
   await worker.send({ type: "save-site-selector", selector: "#close", name: "Close" }, sender);
   const detailsKey = "siteRuleDetails:example.com";
-  const { id } = worker.store.get(detailsKey)["selector:#close"];
+  const { id } = worker.store.read<SavedRuleDetails>(detailsKey)["selector:#close"];
   const edit = { type: "edit-site-selector", hostname, selector: "#close", replacement: "#close" };
   assert.deepEqual(await worker.send({ ...edit, pathPrefix: "https://example.com/", maxClicks: 1 }), { ok: false });
   assert.deepEqual(await worker.send({ ...edit, pathPrefix: "/", maxClicks: 1.2 }), { ok: false });
   assert.equal((await worker.send({ ...edit, pathPrefix: "/dashboard/", maxClicks: 1 })).ok, true);
   const request = { type: "replace-picked-selector", selector: "#close", replacement: "#new", expectedId: id };
   assert.equal((await worker.send(request, sender)).ok, true);
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#new"]), {
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#new"]), {
     id, name: "Close", pathPrefix: "/dashboard", maxClicks: 1
   });
 });
@@ -339,7 +357,7 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   const sender = { url: "chrome-extension://test/rules.html" };
   await worker.send({ type: "save-site-selector", selector: "#first", name: "Keep" }, { url: `https://${hostname}/` });
   const detailsKey = "siteRuleDetails:example.com";
-  const first = structuredClone(worker.store.get(detailsKey)["selector:#first"]);
+  const first = structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#first"]);
   const second = { selector: "#second", name: "Second", paused: false, pathPrefix: "/tasks", maxClicks: 1 };
   const backup = { format: "selector-clicker-rules", version: 1, sites: [
     { hostname, paused: true, rules: [{ selector: "#first", name: "Changed" }, second, second] }
@@ -347,9 +365,9 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   assert.deepEqual(await worker.send({ type: "import-rules", backup }, sender), {
     ok: true, addedCount: 1, duplicateCount: 2
   });
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#first"]), first);
+  assert.deepEqual(structuredClone(worker.store.read<SavedRuleDetails>(detailsKey)["selector:#first"]), first);
   assert.equal(worker.store.has("sitePaused:example.com"), false);
-  const { id, ...actual } = worker.store.get(detailsKey)["selector:#second"];
+  const { id, ...actual } = worker.store.read<SavedRuleDetails>(detailsKey)["selector:#second"];
   const { selector, ...expected } = second;
   assert.ok(id && id !== first.id);
   assert.deepEqual(actual, { ...expected, paused: true });
@@ -365,28 +383,32 @@ test("registers content scripts only for exact granted origins and removes them 
   const sender = { url: "chrome-extension://test/popup.html" };
   const site = "https://example.com/*";
   const broad = "https://*/*";
-  const authorize = (pattern) => worker.send({ type: "authorize-site", pattern }, sender);
+  const authorize = (pattern: string) => worker.send({ type: "authorize-site", pattern }, sender);
   assert.deepEqual(await authorize(site), { ok: false });
   worker.grantedOrigins.add(broad);
   await worker.onPermissionsAdded([broad]);
-  assert.equal(worker.registered, undefined);
+  const broadRegistration = worker.registered;
+  assert.equal(broadRegistration, undefined);
   worker.grantedOrigins.add(site);
   await worker.onPermissionsAdded([site]);
   assert.deepEqual(await authorize(site), { ok: true });
-  assert.deepEqual([...worker.registered.matches], [site]);
-  assert.equal(worker.registered.runAt, "document_idle");
-  assert.deepEqual([...worker.local.get("authorizedSitePatterns")], [site]);
+  const registration = worker.registered;
+  assert.ok(registration);
+  assert.ok(registration.matches);
+  assert.deepEqual([...registration.matches], [site]);
+  assert.equal(registration.runAt, "document_idle");
+  assert.deepEqual([...worker.local.read<string[]>("authorizedSitePatterns")], [site]);
   worker.grantedOrigins.delete(site);
   await worker.onPermissionsRemoved();
   assert.equal(worker.registered, undefined);
-  assert.deepEqual([...worker.local.get("authorizedSitePatterns")], []);
+  assert.deepEqual([...worker.local.read<string[]>("authorizedSitePatterns")], []);
 });
 
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {
   const worker = createWorker();
   const ruleId = "selector:#close";
   worker.store.set("siteSelectors:example.com", ["#close"]);
-  const record = (hostname, tabId, ruleIds) => worker.send({
+  const record = (hostname: string, tabId: number, ruleIds: string[]) => worker.send({
     type: "click-record",
     totalClicks: ruleIds.length,
     ruleIds
@@ -398,9 +420,9 @@ test("clicks accumulate locally across tabs and remain associated after a legacy
     record("other.example", 3, [ruleId])
   ]);
   assert.equal(worker.local.get("totalClickCount"), 4);
-  assert.equal(worker.local.get("siteClickCounts:example.com")[`rule:${ruleId}`], 2);
-  assert.equal(worker.local.get("siteClickCounts:example.com")["rule:selector:#other"], 1);
-  assert.equal(worker.local.get("siteClickCounts:other.example")[`rule:${ruleId}`], 1);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:example.com")[`rule:${ruleId}`], 2);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:example.com")["rule:selector:#other"], 1);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:other.example")[`rule:${ruleId}`], 1);
   assert.equal(worker.store.has("totalClickCount"), false);
 
   await worker.send({
@@ -410,11 +432,11 @@ test("clicks accumulate locally across tabs and remain associated after a legacy
     replacement: "#new-close",
     name: "关闭广告"
   });
-  const rule = worker.store.get("siteRuleDetails:example.com")["selector:#new-close"];
+  const rule = worker.store.read<SavedRuleDetails>("siteRuleDetails:example.com")["selector:#new-close"];
   assert.deepEqual(structuredClone(rule), { id: ruleId, name: "关闭广告" });
   await record("example.com", 2, [rule.id]);
   assert.equal(worker.local.get("totalClickCount"), 5);
-  assert.equal(worker.local.get("siteClickCounts:example.com")[`rule:${ruleId}`], 3);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:example.com")[`rule:${ruleId}`], 3);
 });
 
 test("records the latest click time locally by rule ID and omits it from backups", async () => {
@@ -430,7 +452,7 @@ test("records the latest click time locally by rule ID and omits it from backups
   worker.store.set("siteSelectors:example.com", [selector]);
   worker.local.set("siteClickCounts:example.com", { [key]: 3 });
   assert.equal(worker.local.has(times), false);
-  const record = (tabId, host = hostname) => worker.send(
+  const record = (tabId: number, host = hostname) => worker.send(
     { type: "click-record", ruleIds: [id] }, { url: `https://${host}/`, tab: { id: tabId } }
   );
   const first = record(1);
@@ -438,15 +460,15 @@ test("records the latest click time locally by rule ID and omits it from backups
   const second = record(2);
   now = firstClick + 500;
   await Promise.all([first, second, record(3, "other.example")]);
-  assert.equal(worker.local.get("siteClickCounts:example.com")[key], 5);
-  assert.equal(worker.local.get(times)[key], laterClick);
-  assert.equal(worker.local.get("siteLastClickTimes:other.example")[key], now);
+  assert.equal(worker.local.read<Record<string, number>>("siteClickCounts:example.com")[key], 5);
+  assert.equal(worker.local.read<Record<string, number>>(times)[key], laterClick);
+  assert.equal(worker.local.read<Record<string, number>>("siteLastClickTimes:other.example")[key], now);
   assert.equal(worker.store.has(times), false);
 
   await worker.send({ type: "edit-site-selector", hostname, selector, replacement: "#new", expectedId: id });
-  const saved = worker.store.get("siteRuleDetails:example.com")["selector:#new"];
+  const saved = worker.store.read<SavedRuleDetails>("siteRuleDetails:example.com")["selector:#new"];
   assert.equal(saved.id, id);
-  assert.equal(worker.local.get(times)[`rule:${saved.id}`], laterClick);
+  assert.equal(worker.local.read<Record<string, number>>(times)[`rule:${saved.id}`], laterClick);
   assert.deepEqual(worker.backup().sites[0].rules, [
     { selector: "#new", name: "", paused: false, pathPrefix: "", maxClicks: 0 }
   ]);

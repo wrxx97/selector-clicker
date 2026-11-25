@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import test from "node:test";
-import { getAccessToken, submitForReview } from "../scripts/submit-chrome.mjs";
+import { getAccessToken, submitForReview, type StoreRequestOptions } from "../scripts/submit-chrome.mjs";
 
 const release = {
   archive: Buffer.from("test zip"),
@@ -11,11 +11,11 @@ const release = {
   accessToken: "mock-access-token"
 };
 
-function mockApi(responses) {
-  const calls = [];
+function mockApi(responses: unknown[]) {
+  const calls: { url: string; options: StoreRequestOptions }[] = [];
   return {
     calls,
-    request: async (url, options) => {
+    request: async (url: string, options: StoreRequestOptions) => {
       calls.push({ url, options });
       assert.ok(responses.length > 0, "unexpected API request");
       return new Response(JSON.stringify(responses.shift()));
@@ -35,8 +35,11 @@ test("exchanges a signed service account assertion scoped to Chrome Web Store", 
   assert.equal(await getAccessToken(account, api.request), "mock-access-token");
   const [{ url, options }] = api.calls;
   assert.equal(url, "https://oauth2.googleapis.com/token");
+  assert.ok(options.body instanceof URLSearchParams);
   assert.equal(options.body.get("grant_type"), "urn:ietf:params:oauth:grant-type:jwt-bearer");
-  const [header, payload, signature] = options.body.get("assertion").split(".");
+  const assertion = options.body.get("assertion");
+  assert.ok(assertion);
+  const [header, payload, signature] = assertion.split(".");
   const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
   assert.equal(claims.iss, email);
   assert.equal(claims.aud, url);
@@ -61,6 +64,7 @@ test("waits for an asynchronous ZIP upload before requesting staged review", asy
   const [, upload, , , , publish] = api.calls;
   assert.match(upload.url, /\/upload\/v2\/publishers\//);
   assert.deepEqual(upload.options.body, release.archive);
+  assert.ok(typeof publish.options.body === "string");
   assert.deepEqual(JSON.parse(publish.options.body), { publishType: "STAGED_PUBLISH", skipReview: false });
 });
 

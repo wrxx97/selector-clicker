@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",
-    "test": "node --import tsx --test",
+    "test": "node --import tsx tests/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
     "@types/chrome": "^0.3.8",
+    "@types/node": "^22.20.7",
     "@types/react": "^19.3.2",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",

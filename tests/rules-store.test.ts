@@ -2,28 +2,31 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInThisContext } from "node:vm";
+import type { StorageChanges, StoredValues } from "../src/lib/extension-types";
 
 test("rules store preserves unaffected groups and rows and consumes click updates without rereading storage", async () => {
   runInThisContext(readFileSync(new URL("../site-rules.js", import.meta.url), "utf8"));
-  let storageListener;
+  type StorageListener = (changes: StorageChanges, area: string) => void;
+  let storageListener: StorageListener | undefined;
   let reads = 0;
   let statsReads = 0;
-  let finishStats;
+  let finishStats!: (value: StoredValues) => void;
   const saved = {
     "siteSelectors:first.example": ["#one", "#two"],
     "siteSelectors:second.example": ["#three"],
     "siteRuleDetails:first.example": { "selector:#one": { id: "one", name: "Original" } }
   };
-  globalThis.chrome = {
+  const chromeMock = {
     storage: {
       sync: { async get() { reads += 1; return structuredClone(saved); } },
-      local: { get() { statsReads += 1; return new Promise((resolve) => { finishStats = resolve; }); } },
+      local: { get() { statsReads += 1; return new Promise<StoredValues>((resolve) => { finishStats = resolve; }); } },
       onChanged: {
-        addListener(listener) { storageListener = listener; },
+        addListener(listener: StorageListener) { storageListener = listener; },
         removeListener() { storageListener = undefined; }
       }
     }
   };
+  Object.defineProperty(globalThis, "chrome", { configurable: true, value: chromeMock });
   try {
     const { useRulesStore, startRules } = await import("../src/lib/rules-store.ts");
     const stop = startRules();
@@ -32,10 +35,12 @@ test("rules store preserves unaffected groups and rows and consumes click update
       const tick = () => new Promise((resolve) => setImmediate(resolve));
       await tick();
       const groups = state().sites;
+      assert.ok(groups);
+      assert.ok(storageListener);
       storageListener({ totalClickCount: { newValue: 5 } }, "local");
       finishStats({ totalClickCount: 4 });
       await tick();
-      assert.equal(state().stats.totalClickCount, 5);
+      assert.equal(state().stats?.totalClickCount, 5);
       assert.equal(state().sites, groups);
       assert.equal(statsReads, 1);
       assert.equal(reads, 1);
@@ -44,6 +49,7 @@ test("rules store preserves unaffected groups and rows and consumes click update
       storageListener({ "siteRuleDetails:first.example": { newValue: saved["siteRuleDetails:first.example"] } }, "sync");
       await tick();
       const updated = state().sites;
+      assert.ok(updated);
       assert.notEqual(updated[0], groups[0]);
       assert.equal(updated[0].rules[0].name, "Edited");
       assert.equal(updated[0].rules[1], groups[0].rules[1]);
@@ -54,6 +60,6 @@ test("rules store preserves unaffected groups and rows and consumes click update
       stop();
     }
   } finally {
-    delete globalThis.chrome;
+    Reflect.deleteProperty(globalThis, "chrome");
   }
 });

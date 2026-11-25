@@ -1,24 +1,24 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import { BrandIcon } from "@/components/ui/brand-icon";
 import { ClipboardCopy, ClipboardPaste, Download, MousePointer2, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Toast, useToast } from "@/components/ui/toast";
+import { Toast, useToast, type ToastFeedback } from "@/components/ui/toast";
 import { MAX_BACKUP_BYTES, exportRuleFile, formatRuleBackup, previewRuleImport } from "@/lib/backup";
 import { TOTAL_CLICK_COUNT_KEY } from "@/lib/extension";
 import { startRules, useRulesStore } from "@/lib/rules-store";
 import { startTheme } from "@/lib/theme";
-import { BackupDialog, EditorDialog, SiteDialog } from "./rule-dialogs.jsx";
+import { BackupDialog, EditorDialog, SiteDialog, type ManagerDialog, type OpenManagerDialog } from "./rule-dialogs";
 import { CooldownSettings } from "./rule-settings";
-import { RulesList } from "./rule-sites.jsx";
+import { RulesList } from "./rule-sites";
 import { ThemeSettings } from "./theme-settings";
 import "./theme.css";
 
 const Settings = memo(CooldownSettings);
 
 const ManagerHeader = memo(function ManagerHeader() {
-  const total = useRulesStore(({ stats }) => stats === null ? null : stats[TOTAL_CLICK_COUNT_KEY] || 0);
+  const total = useRulesStore(({ stats }) => stats === null ? null : Number(stats[TOTAL_CLICK_COUNT_KEY]) || 0);
   return <header className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-linear-to-br from-banner-start to-banner-end px-4 py-4 sm:px-6">
     <BrandIcon size={48} />
     <div className="min-w-0 flex-1">
@@ -34,7 +34,7 @@ const ManagerHeader = memo(function ManagerHeader() {
   </header>;
 });
 
-const RuleSearch = memo(function RuleSearch({ searchInput }) {
+const RuleSearch = memo(function RuleSearch({ searchInput }: { searchInput: RefObject<HTMLInputElement | null> }) {
   const search = useRulesStore((state) => state.search);
   const setSearch = useRulesStore((state) => state.setSearch);
   return <div className="relative w-full sm:w-72">
@@ -45,11 +45,14 @@ const RuleSearch = memo(function RuleSearch({ searchInput }) {
   </div>;
 });
 
-const BackupActions = memo(function BackupActions({ openDialog, setFeedback }) {
+const BackupActions = memo(function BackupActions({ openDialog, setFeedback }: {
+  openDialog: OpenManagerDialog;
+  setFeedback(feedback: ToastFeedback): void;
+}) {
   const loaded = useRulesStore((state) => state.sites !== null);
   const [busy, setBusy] = useState(false);
-  const file = useRef(null);
-  const fileButton = useRef(null);
+  const file = useRef<HTMLInputElement>(null);
+  const fileButton = useRef<HTMLButtonElement>(null);
 
   async function copyBackup() {
     const { sites } = useRulesStore.getState();
@@ -74,8 +77,8 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }) {
     }
   }
 
-  async function openFile(event) {
-    const [selected] = event.target.files;
+  async function openFile(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0];
     event.target.value = "";
     if (!selected) return;
     setBusy(true);
@@ -85,7 +88,7 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }) {
       const preview = await previewRuleImport(text);
       openDialog({ kind: "backup", source: { type: "file", preview } }, fileButton.current);
     } catch (error) {
-      setFeedback({ text: error.message, error: true });
+      setFeedback({ text: error instanceof Error ? error.message : "无法导入规则文件，请重试。", error: true });
     } finally {
       setBusy(false);
     }
@@ -93,7 +96,7 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }) {
 
   return <div className="flex flex-wrap gap-1.5" aria-label="规则备份">
     <Button ref={fileButton} id="import-rules" size="sm" variant="outline" disabled={Boolean(busy)}
-      onClick={() => file.current.click()}><Upload /> 导入文件</Button>
+      onClick={() => file.current?.click()}><Upload /> 导入文件</Button>
     <Button id="paste-rules" size="sm" variant="outline" disabled={Boolean(busy)}
       onClick={(event) => { openDialog({ kind: "backup", source: { type: "text" } }, event.currentTarget); }}>
       <ClipboardPaste /> 粘贴 JSON
@@ -108,7 +111,7 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }) {
   </div>;
 });
 
-function RulesLoadFeedback({ setFeedback }) {
+function RulesLoadFeedback({ setFeedback }: { setFeedback(feedback: ToastFeedback): void }) {
   const loadError = useRulesStore((state) => state.loadError);
   useEffect(() => {
     if (loadError) setFeedback({ text: "无法读取站点规则，请重新打开此页面。", error: true });
@@ -118,25 +121,25 @@ function RulesLoadFeedback({ setFeedback }) {
 
 function RuleManager() {
   const { feedback, setFeedback, dismiss } = useToast();
-  const [dialog, setDialog] = useState(null);
-  const searchInput = useRef(null);
-  const trigger = useRef(null);
+  const [dialog, setDialog] = useState<ManagerDialog | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLElement>(null);
 
   useEffect(startTheme, []);
   useEffect(startRules, []);
-  const openDialog = useCallback((next, button) => {
+  const openDialog = useCallback<OpenManagerDialog>((next, button) => {
     trigger.current = button;
     setDialog(next);
   }, []);
   const close = () => setDialog(null);
 
-  function focusTrigger(event) {
+  function focusTrigger(event: Event) {
     event.preventDefault();
     const target = trigger.current?.isConnected ? trigger.current : searchInput.current;
     target?.focus();
   }
 
-  async function showSaved(message) {
+  async function showSaved(message: string) {
     await useRulesStore.getState().loadRules();
     close();
     setFeedback({ text: message });
@@ -160,4 +163,5 @@ function RuleManager() {
   </main>;
 }
 
-createRoot(document.getElementById("root")).render(<RuleManager />);
+const root = document.getElementById("root");
+if (root) createRoot(root).render(<RuleManager />);

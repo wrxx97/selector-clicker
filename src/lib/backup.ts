@@ -1,8 +1,9 @@
 import { createRuleBackup, getRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension";
+import type { ImportSite, RuleSite } from "./extension-types";
 
 export const MAX_BACKUP_BYTES = 1024 * 1024;
 
-export function formatRuleBackup(sites) {
+export function formatRuleBackup(sites: RuleSite[]) {
   return JSON.stringify(createRuleBackup(sites), null, 2) + "\n";
 }
 
@@ -16,7 +17,7 @@ export async function exportRuleFile() {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function validateSelector(selector) {
+export function validateSelector(selector: string) {
   if (!selector.trim()) return "请输入 CSS 选择器。";
   try {
     document.createDocumentFragment().querySelector(selector);
@@ -26,17 +27,24 @@ export function validateSelector(selector) {
   }
 }
 
-export async function previewRuleImport(text) {
+export interface BackupPreview {
+  backup: unknown;
+  entries: ImportSite[];
+  added: number;
+  duplicates: number;
+}
+
+export async function previewRuleImport(text: string): Promise<BackupPreview> {
   const input = text.trim();
   if (!input) throw new Error("请输入或粘贴规则 JSON。");
   if (new Blob([input]).size > MAX_BACKUP_BYTES) throw new Error("规则 JSON 不能超过 1 MB。");
-  let backup;
+  let backup: unknown;
   try {
     backup = JSON.parse(input);
   } catch {
     throw new Error("JSON 格式无效，请检查内容是否完整。");
   }
-  let sites;
+  let sites: ReturnType<typeof parseRuleBackup>;
   try {
     sites = parseRuleBackup(backup, (selector) => !validateSelector(selector));
   } catch {

@@ -1,33 +1,37 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { StorageChanges, StoredValues } from "../src/lib/extension-types";
 
 test("reads and synchronizes theme preferences and preserves the latest selection", async () => {
-  let listener;
-  let resolveInitial;
-  const dataset = {};
-  const writes = [];
-  globalThis.document = { documentElement: { dataset } };
-  globalThis.chrome = {
+  type StorageListener = (changes: StorageChanges, area: string) => void;
+  let listener: StorageListener | undefined;
+  let resolveInitial!: (value: StoredValues) => void;
+  const dataset: Record<string, string> = {};
+  const writes: StoredValues[] = [];
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: { dataset } } });
+  const chromeMock = {
     storage: {
       sync: {
-        get: () => new Promise((resolve) => { resolveInitial = resolve; }),
-        async set(settings) {
+        get: () => new Promise<StoredValues>((resolve) => { resolveInitial = resolve; }),
+        async set(settings: StoredValues) {
           if (settings.uiTheme === "rose") throw new Error("Storage unavailable");
           writes.push(settings);
         }
       },
       onChanged: {
-        addListener(callback) { listener = callback; },
-        removeListener(callback) { assert.equal(listener, callback); listener = undefined; }
+        addListener(callback: StorageListener) { listener = callback; },
+        removeListener(callback: StorageListener) { assert.equal(listener, callback); listener = undefined; }
       }
     }
   };
+  Object.defineProperty(globalThis, "chrome", { configurable: true, value: chromeMock });
 
   try {
     const { saveTheme, startTheme, themeOptions, useThemeStore } = await import("../src/lib/theme.ts");
     const stop = startTheme();
     try {
       assert.equal(themeOptions.length, 5);
+      assert.ok(listener);
       listener({ uiTheme: { newValue: "night" } }, "sync");
       resolveInitial({ uiTheme: "sky" });
       await new Promise((resolve) => setImmediate(resolve));
@@ -46,7 +50,7 @@ test("reads and synchronizes theme preferences and preserves the latest selectio
       stop();
     }
   } finally {
-    delete globalThis.chrome;
-    delete globalThis.document;
+    Reflect.deleteProperty(globalThis, "chrome");
+    Reflect.deleteProperty(globalThis, "document");
   }
 });

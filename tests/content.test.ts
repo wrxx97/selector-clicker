@@ -1,15 +1,31 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const test = require("node:test");
-const vm = require("node:vm");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import vm from "node:vm";
+import type { PageRequest, PageResponses, StorageChanges, StoredValues } from "../src/lib/extension-types";
+
+type RuntimeReply = PageResponses[keyof PageResponses];
+type RuntimeListener = (message: PageRequest & { hostname?: string }, sender: object, reply: (value: RuntimeReply) => void) => void;
+type StorageListener = (changes: StorageChanges, area: string) => void;
+
+interface ElementState {
+  clicks: number;
+  highlights: number;
+  disabled: boolean;
+  connected: boolean;
+  display: string;
+  visibility: string;
+  opacity: string;
+  width: number;
+  height: number;
+}
 
 const contentScript = ["site-rules.js", "picker.js", "content.js"]
-  .map((file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8"))
+  .map((file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8"))
   .join("\n");
 const siteKey = "siteSelectors:example.com";
 
-function createElement(options = {}) {
+function createElement(options: Partial<ElementState> = {}) {
   const state = {
     clicks: 0,
     highlights: 0,
@@ -44,6 +60,16 @@ function createElement(options = {}) {
   };
 }
 
+interface ContentFixture {
+  config: StoredValues;
+  elementsBySelector?: Record<string, ReturnType<typeof createElement>[]>;
+  invalidSelectors?: string[];
+  url?: string;
+  authorized?: boolean;
+  reinject?: boolean;
+  now?: () => number;
+}
+
 async function startContentScript({
   config,
   elementsBySelector = {},
@@ -52,17 +78,37 @@ async function startContentScript({
   authorized = true,
   reinject = false,
   now = Date.now
-}) {
-  const runtimeListeners = [];
-  const storageListeners = [];
-  const messages = [];
-  const timeouts = new Map();
+}: ContentFixture) {
+  const runtimeListeners: RuntimeListener[] = [];
+  const storageListeners: StorageListener[] = [];
+  const messages: { type: string; [key: string]: unknown }[] = [];
+  const timeouts = new Map<number, () => void>();
   let nextTimeoutId = 0;
-  let observer;
+  let observer: MockMutationObserver | undefined;
+
+  class MockMutationObserver {
+    options?: MutationObserverInit;
+
+    constructor(private callback: () => void) {
+      observer = this;
+    }
+
+    observe(_target: object, options: MutationObserverInit) {
+      this.options = options;
+    }
+
+    disconnect() {
+      this.options = undefined;
+    }
+
+    notify(type: keyof MutationObserverInit) {
+      if (this.options?.[type]) this.callback();
+    }
+  }
 
   const document = {
     documentElement: {},
-    querySelectorAll(selector) {
+    querySelectorAll(selector: string) {
       if (invalidSelectors.includes(selector)) {
         throw new Error(`Invalid selector: ${selector}`);
       }
@@ -75,45 +121,31 @@ async function startContentScript({
     URL,
     location: { href: url },
     document,
-    MutationObserver: class {
-      constructor(callback) {
-        this.callback = callback;
-        observer = this;
-      }
-      observe(_target, options) {
-        this.options = options;
-      }
-      disconnect() {
-        this.options = undefined;
-      }
-      notify(type) {
-        if (this.options?.[type]) this.callback();
-      }
-    },
+    MutationObserver: MockMutationObserver,
     window: {
-      getComputedStyle(element) {
+      getComputedStyle(element: ReturnType<typeof createElement>) {
         return {
           display: element.state.display,
           visibility: element.state.visibility,
           opacity: element.state.opacity
         };
       },
-      setTimeout(callback) {
+      setTimeout(callback: () => void) {
         const id = ++nextTimeoutId;
         timeouts.set(id, callback);
         return id;
       },
-      clearTimeout(id) {
+      clearTimeout(id: number) {
         timeouts.delete(id);
       }
     },
     chrome: {
       runtime: {
-        sendMessage(message) {
+        sendMessage(message: typeof messages[number]) {
           messages.push(message);
         },
         onMessage: {
-          addListener(listener) {
+          addListener(listener: RuntimeListener) {
             runtimeListeners.push(listener);
           }
         }
@@ -127,7 +159,7 @@ async function startContentScript({
           }
         },
         sync: {
-          get(defaults) {
+          get(defaults: StoredValues) {
             const settings = { ...defaults };
             for (const key of Object.keys(defaults)) {
               if (Object.hasOwn(config, key)) settings[key] = config[key];
@@ -136,7 +168,7 @@ async function startContentScript({
           }
         },
         onChanged: {
-          addListener(listener) {
+          addListener(listener: StorageListener) {
             storageListeners.push(listener);
           }
         }
@@ -149,6 +181,7 @@ async function startContentScript({
   if (reinject) vm.runInContext(contentScript, context, { filename: "content.js" });
   await new Promise((resolve) => setImmediate(resolve));
 
+  assert.ok(observer);
   return {
     messages,
     runtimeListeners,
@@ -164,15 +197,18 @@ async function startContentScript({
   };
 }
 
-function sendMessage(listener, message) {
-  let response;
+function sendMessage<Message extends PageRequest & { hostname?: string }>(
+  listener: RuntimeListener, message: Message
+): PageResponses[Message["type"]] {
+  let response: RuntimeReply | undefined;
   listener(message, {}, (value) => {
     response = value;
   });
-  return response;
+  assert.ok(response);
+  return response as PageResponses[Message["type"]];
 }
 
-function toPlainObject(value) {
+function toPlainObject(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -204,7 +240,7 @@ test("scans when an existing matching element becomes visible after an attribute
   });
 
   assert.equal(closeButton.state.clicks, 0);
-  assert.equal(app.observer.options.subtree, true);
+  assert.equal(app.observer.options?.subtree, true);
   closeButton.state.display = "block";
   app.observer.notify("attributes");
   assert.equal(app.timeouts.size, 1);
@@ -214,7 +250,7 @@ test("scans when an existing matching element becomes visible after an attribute
 });
 
 test("scans after insertion and batches mutations without delaying the pending scan", async () => {
-  const matches = [];
+  const matches: ReturnType<typeof createElement>[] = [];
   const closeButton = createElement();
   const app = await startContentScript({
     config: { enabled: true, [siteKey]: [".ad-close"] },
@@ -272,7 +308,7 @@ test("observes and clicks a site rule only on its saved hostname", async () => {
   });
 
   assert.equal(matchingSite.state.clicks, 1);
-  assert.equal(app.observer.options.childList, true);
+  assert.equal(app.observer.options?.childList, true);
   assert.equal(differentSite.state.clicks, 0);
   assert.equal(otherApp.observer.options, undefined);
 });
@@ -316,10 +352,11 @@ test("applies a new site rule and disconnects after the last rule is removed", a
     config: { enabled: true },
     elementsBySelector: { ".ad-close": [closeButton] }
   });
-  assert.equal(app.observer.options, undefined);
+  const initialOptions = app.observer.options;
+  assert.equal(initialOptions, undefined);
   app.storageListeners[0]({ [siteKey]: { newValue: [".ad-close"] } }, "sync");
   assert.equal(closeButton.state.clicks, 1);
-  assert.equal(app.observer.options.childList, true);
+  assert.equal(app.observer.options?.childList, true);
   app.storageListeners[0]({ [siteKey]: { oldValue: [".ad-close"] } }, "sync");
   assert.equal(app.observer.options, undefined);
 });
@@ -355,7 +392,7 @@ test("tests saved rules without clicking or recording statistics", async () => {
     config: { [siteKey]: ["#ready", "#hidden", "#multiple", "#missing"] },
     elementsBySelector: { "#ready": [target], "#hidden": [hidden], "#multiple": [target, hidden] }
   });
-  const diagnose = (selector) => sendMessage(app.runtimeListeners[0], {
+  const diagnose = (selector: string) => sendMessage(app.runtimeListeners[0], {
     type: "test-rule", hostname: "example.com", selector
   });
   assert.equal(diagnose("#ready").status, "ready");
@@ -419,12 +456,12 @@ test("disconnects scanning when all rules are paused and resumes a single rule i
   });
   assert.equal(pausedButton.state.clicks, 0);
   assert.equal(activeButton.state.clicks, 1);
-  const update = (changes) => app.storageListeners[0](changes, "sync");
+  const update = (changes: StorageChanges) => app.storageListeners[0](changes, "sync");
   update({ [detailsKey]: { newValue: { "selector:#one": { paused: true }, "selector:#two": { paused: true } } } });
   assert.equal(app.observer.options, undefined);
   sendMessage(app.runtimeListeners[0], { type: "scan-now" });
   assert.equal(pausedButton.state.clicks, 0);
-  const testRule = (selector) => sendMessage(app.runtimeListeners[0], {
+  const testRule = (selector: string) => sendMessage(app.runtimeListeners[0], {
     type: "test-rule", hostname: "example.com", selector
   });
   assert.equal(testRule("#two").status, "rule-paused");
@@ -483,7 +520,7 @@ test("runs only for the authorized origin and stops an open tab when access is r
     config: { enabled: true, [siteKey]: ["#close"] },
     elementsBySelector: { "#close": [target] }
   });
-  const changeAccess = (newValue) => app.storageListeners[0]({ authorizedSitePatterns: { newValue } }, "local");
+  const changeAccess = (newValue: string[]) => app.storageListeners[0]({ authorizedSitePatterns: { newValue } }, "local");
   assert.equal(app.runtimeListeners.length, 1);
   assert.equal(app.observer.options, undefined);
   changeAccess(["http://example.com/*", "https://other.example/*"]);

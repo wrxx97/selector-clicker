@@ -2,46 +2,44 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInThisContext } from "node:vm";
+import type { PageRequest, StoredValues, WorkerRequest } from "../src/lib/extension-types";
 
 test("popup keeps rule and settings references stable on click updates and refreshes only affected rules", async () => {
   runInThisContext(readFileSync(new URL("../site-rules.js", import.meta.url), "utf8"));
   const hostname = "example.com";
   const selectorsKey = `siteSelectors:${hostname}`;
   const detailsKey = `siteRuleDetails:${hostname}`;
-  const saved = {
-    enabled: true,
-    cooldown: 5000,
-    [selectorsKey]: ["#first", "#second"],
-    [detailsKey]: {
-      "selector:#first": { id: "first", name: "First" },
-      "selector:#second": { id: "second", name: "Second" }
-    }
+  const selectors = ["#first", "#second"];
+  const details: Record<string, { id: string; name: string; paused?: boolean }> = {
+    "selector:#first": { id: "first", name: "First" },
+    "selector:#second": { id: "second", name: "Second" }
   };
+  const saved: StoredValues = { enabled: true, cooldown: 5000, [selectorsKey]: selectors, [detailsKey]: details };
   let ruleReads = 0;
   let pageClicks = 2;
   let failPause = false;
   let scanCount = 0;
   let failScan = false;
-  const writes = [];
-  globalThis.chrome = {
+  const writes: StoredValues[] = [];
+  const chromeMock = {
     storage: {
       sync: {
-        async get(defaults) {
+        async get(defaults: StoredValues) {
           if (selectorsKey in defaults) ruleReads += 1;
           return structuredClone(Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, saved[key] ?? value])));
         },
-        async set(values) {
+        async set(values: StoredValues) {
           writes.push(values);
           Object.assign(saved, values);
         }
       },
-      local: { async get(defaults) {
+      local: { async get(defaults: StoredValues) {
         return { ...defaults, authorizedSitePatterns: ["https://example.com/*"] };
       } }
     },
     tabs: {
       async query() { return [{ id: 1, url: "https://example.com/page" }]; },
-      async sendMessage(_id, { type }) {
+      async sendMessage(_id: number, { type }: PageRequest) {
         if (type === "scan-now") {
           if (failScan) throw new Error("Tab disconnected");
           scanCount += 1;
@@ -52,14 +50,15 @@ test("popup keeps rule and settings references stable on click updates and refre
     },
     permissions: { async contains() { return true; } },
     runtime: {
-      async sendMessage({ type, selector, paused }) {
+      async sendMessage(message: Extract<WorkerRequest, { type: "set-site-paused" | "set-rule-paused" }>) {
         if (failPause) return { ok: false };
-        const targets = type === "set-site-paused" ? saved[selectorsKey] : [selector];
-        for (const target of targets) saved[detailsKey][`selector:${target}`].paused = paused;
+        const targets = message.type === "set-site-paused" ? selectors : [message.selector];
+        for (const target of targets) details[`selector:${target}`].paused = message.paused;
         return { ok: true };
       }
     }
   };
+  Object.defineProperty(globalThis, "chrome", { configurable: true, value: chromeMock });
 
   try {
     const { usePopupStore } = await import("../src/popup/store.ts");
@@ -83,7 +82,7 @@ test("popup keeps rule and settings references stable on click updates and refre
 
     await baseline.loadRules();
     assert.equal(usePopupStore.getState().rules, baseline.rules);
-    saved[detailsKey]["selector:#first"].name = "Changed";
+    details["selector:#first"].name = "Changed";
     await baseline.loadRules();
     const updated = usePopupStore.getState().rules;
     assert.notEqual(updated[0], baseline.rules[0]);
@@ -108,7 +107,7 @@ test("popup keeps rule and settings references stable on click updates and refre
     assert.equal(state().toast, null);
 
     await state().pause({ paused: true });
-    saved[detailsKey]["selector:#second"].paused = false;
+    details["selector:#second"].paused = false;
     state().storageChanged({ [detailsKey]: { newValue: saved[detailsKey] } }, "sync");
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(state().rules.map((rule) => rule.paused), [true, false]);
@@ -116,6 +115,7 @@ test("popup keeps rule and settings references stable on click updates and refre
     failPause = true;
     await state().pause({ selector: "#first", expectedId: "first", paused: false });
     const previousToast = state().toast;
+    assert.ok(previousToast);
     assert.equal(previousToast.error, true);
     const { readCooldown, saveCooldown } = await import("../src/lib/extension.ts");
     assert.equal(await readCooldown(), 5000);
@@ -138,12 +138,13 @@ test("popup keeps rule and settings references stable on click updates and refre
     assert.equal(await readCooldown(), 9000);
     await state().scan();
     assert.equal(scanCount, 1);
-    assert.equal(state().toast.text, "开启自动点击后即可扫描。");
+    assert.equal(state().toast?.text, "开启自动点击后即可扫描。");
     state().dismissToast(previousToast);
-    assert.ok(state().toast);
-    state().dismissToast(state().toast);
+    const latestToast = state().toast;
+    assert.ok(latestToast);
+    state().dismissToast(latestToast);
     assert.equal(state().toast, null);
   } finally {
-    delete globalThis.chrome;
+    Reflect.deleteProperty(globalThis, "chrome");
   }
 });

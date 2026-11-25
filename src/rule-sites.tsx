@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { changePause, siteClickCountsKey, siteLastClickTimesKey } from "@/lib/extension";
 import { useRulesStore } from "@/lib/rules-store";
+import type { ToastFeedback } from "@/components/ui/toast";
+import type { PauseOptions, Rule, RuleSite } from "@/lib/extension-types";
+import type { OpenManagerDialog } from "./rule-dialogs";
 
 const count = new Intl.NumberFormat("zh-CN");
 const clickTime = new Intl.DateTimeFormat("zh-CN", {
@@ -12,7 +15,21 @@ const clickTime = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
 });
 
-const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialog }) {
+interface RuleRowProps {
+  hostname: string;
+  rule: Rule;
+  busy: boolean;
+  onPause(options: PauseOptions): Promise<void>;
+  openDialog: OpenManagerDialog;
+}
+
+function ruleStat(group: unknown, key: string) {
+  if (!group || typeof group !== "object") return undefined;
+  const value = (group as Record<string, unknown>)[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialog }: RuleRowProps) {
   const conditions = [
     rule.pathPrefix && `路径 ${rule.pathPrefix}`,
     rule.maxClicks && `每页最多 ${rule.maxClicks} 次`
@@ -20,8 +37,8 @@ const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialo
   const statsKey = `rule:${rule.id}`;
   const { loaded, clicks, clickedAt } = useRulesStore(useShallow(({ stats }) => ({
     loaded: stats !== null,
-    clicks: stats?.[siteClickCountsKey(hostname)]?.[statsKey] || 0,
-    clickedAt: stats?.[siteLastClickTimesKey(hostname)]?.[statsKey]
+    clicks: ruleStat(stats?.[siteClickCountsKey(hostname)], statsKey) ?? 0,
+    clickedAt: ruleStat(stats?.[siteLastClickTimesKey(hostname)], statsKey)
   })));
   const lastClick = new Date(clickedAt ?? NaN);
   return <li data-paused={rule.paused}
@@ -55,11 +72,21 @@ const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialo
   </li>;
 });
 
-const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setFeedback }) {
+interface RulesListProps {
+  openDialog: OpenManagerDialog;
+  setFeedback(feedback: ToastFeedback | null): void;
+}
+
+interface SiteGroupProps extends RulesListProps {
+  site: RuleSite;
+  visibleRules: Rule[];
+}
+
+const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setFeedback }: SiteGroupProps) {
   const { hostname, paused } = site;
   const [busy, setBusy] = useState(false);
 
-  const pause = useCallback(async (options) => {
+  const pause = useCallback(async (options: PauseOptions) => {
     setBusy(true);
     setFeedback(null);
     try {
@@ -99,7 +126,7 @@ const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setF
   </Card>;
 });
 
-export const RulesList = memo(function RulesList({ openDialog, setFeedback }) {
+export const RulesList = memo(function RulesList({ openDialog, setFeedback }: RulesListProps) {
   const { sites, search, loadError } = useRulesStore(useShallow((state) => ({
     sites: state.sites, search: state.search, loadError: state.loadError
   })));

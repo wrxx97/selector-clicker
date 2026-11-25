@@ -74,7 +74,7 @@
 
 ## 🧪 开发与测试
 
-弹窗和规则管理页使用 React、Vite、shadcn/ui、Tailwind CSS v4 和 Zustand。弹窗、扩展接口及共享 UI 组件支持 TypeScript。建议使用 Node.js 22.12 或更高的 LTS 版本，pnpm 版本记录在 `package.json`。在项目目录运行以下命令。
+弹窗和规则管理页使用 React、Vite、shadcn/ui、Tailwind CSS v4 和 Zustand。弹窗、规则管理页、扩展接口、共享 UI 组件及测试使用 TypeScript。建议使用 Node.js 22.12 或更高的 LTS 版本，pnpm 版本记录在 `package.json`。在项目目录运行以下命令。
 
 ```powershell
 pnpm install --frozen-lockfile
