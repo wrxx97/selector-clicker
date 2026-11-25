@@ -97,5 +97,5 @@ npm run build
 本地构建后，可使用 Python 3.10 或更新版本将 `dist/` 打成 ZIP。
 
 ```powershell
-python scripts/package-chrome.py selector-clicker-1.1.0.zip
+python scripts/package-chrome.py selector-clicker-1.2.0.zip
 ```
