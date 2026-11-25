@@ -1,58 +1,89 @@
-name: Chrome Web Store release
+name: Build extension ZIP
 
 on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - manifest.json
   workflow_dispatch:
-    inputs:
-      submit_for_review:
-        description: Submit this package for review and stage it for manual publishing
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: chrome-web-store-release
-  cancel-in-progress: false
-
 jobs:
-  release:
+  build:
+    if: ${{ github.event.deleted != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check manifest version
+        id: version
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], encoding="utf-8").strip()
+
+          version = json.loads(Path("manifest.json").read_text(encoding="utf-8"))["version"]
+          if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,3}", version):
+              raise SystemExit("manifest.json must contain a valid numeric extension version.")
+
+          if os.environ["GITHUB_EVENT_NAME"] == "push":
+              event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+              before = event["before"]
+              if before == "0" * 40:
+                  # A newly created branch has no previous tip.
+                  pushed = {commit["id"] for commit in event["commits"]}
+                  history = git("rev-list", "--first-parent", "HEAD").splitlines()
+                  before = next((commit for commit in history if commit not in pushed), None)
+              elif subprocess.run(["git", "cat-file", "-e", f"{before}^{{commit}}"], stderr=subprocess.DEVNULL).returncode:
+                  # A force push can leave the old tip outside the fetched branch history.
+                  subprocess.run(["git", "fetch", "--no-tags", "origin", before], check=True)
+
+              previous = None
+              if before and git("ls-tree", "--name-only", before, "--", "manifest.json"):
+                  previous = json.loads(git("show", f"{before}:manifest.json")).get("version")
+              if version == previous:
+                  print(f"Extension version remains {version}. Skipping build.")
+                  raise SystemExit(0)
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"version={version}", file=output)
+          PY
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.version.outputs.version != ''
         with:
           node-version: '22'
           package-manager-cache: false
 
       - name: Run tests
+        if: steps.version.outputs.version != ''
         run: npm test
 
-      - name: Build Chrome Web Store ZIP
+      - name: Build extension ZIP
+        if: steps.version.outputs.version != ''
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          python3 scripts/package-chrome.py "$RUNNER_TEMP/selector-clicker.zip"
-          python3 -m zipfile -t "$RUNNER_TEMP/selector-clicker.zip"
+          archive="$RUNNER_TEMP/selector-clicker-$BUILD_VERSION.zip"
+          python3 scripts/package-chrome.py "$archive"
+          python3 -m zipfile -t "$archive"
 
-      - name: Save release ZIP
+      - name: Save extension ZIP
+        if: steps.version.outputs.version != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: ${{ runner.temp }}/selector-clicker.zip
+          path: ${{ runner.temp }}/selector-clicker-${{ steps.version.outputs.version }}.zip
           if-no-files-found: error
           archive: false
-
-      - name: Submit for review with manual publishing
-        if: ${{ inputs.submit_for_review }}
-        env:
-          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
-          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
-          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
-        run: |
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "Select main when submitting to the Chrome Web Store."
-            exit 1
-          fi
-          node scripts/submit-chrome.mjs "$RUNNER_TEMP/selector-clicker.zip"
