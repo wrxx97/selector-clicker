@@ -19,6 +19,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       artifact_id: ${{ steps.archive.outputs.artifact-id }}
+      notes: ${{ steps.notes.outputs.text }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +94,24 @@ jobs:
           archive: false
           overwrite: true
 
+      - name: Read release notes
+        id: notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.version.outputs.version != ''
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ -f CHANGELOG.md ]]; then
+            delimiter=$(python3 -c 'from uuid import uuid4; print(uuid4())')
+            {
+              printf 'text<<%s\n' "$delimiter"
+              awk -v version="[$BUILD_VERSION]" '
+                $1 == "##" { if (found) exit; found = ($2 == version); next }
+                found { print }
+              ' CHANGELOG.md
+              printf '%s\n' "$delimiter"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   release:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.version != ''
@@ -116,6 +135,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_NOTES: ${{ needs.build.outputs.notes }}
         run: |
           tag="v$BUILD_VERSION"
           asset="selector-clicker-$BUILD_VERSION.zip"
@@ -134,7 +154,7 @@ jobs:
 
           if ! release=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish,assets); then
             gh release create "$tag" "$archive" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "Selector Clicker $tag" --generate-notes
+              --target "$GITHUB_SHA" --title "Selector Clicker $tag" --notes "$RELEASE_NOTES" --generate-notes
             exit 0
           fi
 

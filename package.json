@@ -1,6 +1,6 @@
 {
   "name": "selector-clicker",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "Tests for the Selector Clicker browser extension.",
   "scripts": {
