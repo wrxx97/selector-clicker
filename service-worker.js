@@ -118,19 +118,25 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
 }
 
 function recordClickStats(hostname, ruleIds) {
-  const siteKey = siteClickCountsKey(hostname);
+  const countsKey = siteClickCountsKey(hostname);
+  const timesKey = siteLastClickTimesKey(hostname);
+  const clickedAt = Date.now();
   const update = clickStatsUpdates.then(async () => {
-    const { [siteKey]: currentCounts, [TOTAL_CLICK_COUNT_KEY]: total } = await chrome.storage.local.get({
-      [siteKey]: {},
+    const { [countsKey]: currentCounts, [timesKey]: currentTimes, [TOTAL_CLICK_COUNT_KEY]: total } = await chrome.storage.local.get({
+      [countsKey]: {},
+      [timesKey]: {},
       [TOTAL_CLICK_COUNT_KEY]: 0
     });
     const counts = { ...currentCounts };
+    const times = { ...currentTimes };
     for (const id of ruleIds) {
       const key = `rule:${id}`;
       counts[key] = (counts[key] || 0) + 1;
+      times[key] = Math.max(times[key] || 0, clickedAt);
     }
     await chrome.storage.local.set({
-      [siteKey]: counts,
+      [countsKey]: counts,
+      [timesKey]: times,
       [TOTAL_CLICK_COUNT_KEY]: total + ruleIds.length
     });
   });

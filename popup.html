@@ -3,68 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Selector Clicker</title>
-    <link rel="stylesheet" href="popup.css" />
+    <title>元素自动点击</title>
   </head>
   <body>
-    <main>
-      <header class="masthead">
-        <span class="brand-mark" aria-hidden="true"><span class="target"></span></span>
-        <div class="brand-copy">
-          <h1>元素自动点击</h1>
-          <p class="automation-status"><span id="status-dot" aria-hidden="true"></span><span id="status">已停用</span></p>
-        </div>
-        <label class="switch" title="启用或停用自动点击">
-          <input id="enabled" type="checkbox" role="switch" aria-label="自动点击" />
-          <span class="slider" aria-hidden="true"></span>
-        </label>
-      </header>
-
-      <section class="card site-card" aria-labelledby="site-name">
-        <div class="site-heading">
-          <div class="site-heading-copy">
-            <p class="section-label">当前网站</p>
-            <h2 id="site-name">正在读取…</h2>
-          </div>
-          <div class="site-tools">
-            <button id="manage-rules" class="manage-rules" type="button">管理规则</button>
-            <span id="rule-count" class="rule-count" hidden></span>
-          </div>
-        </div>
-        <button id="pick-element" class="pick-element" type="button" disabled>
-          <span class="target" aria-hidden="true"></span>
-          <span id="pick-label">在页面上选取元素</span>
-        </button>
-        <p id="picker-status" class="feedback" role="status"></p>
-        <div id="site-rules" class="site-rules" hidden>
-          <button id="toggle-site-pause" class="button-outline" type="button" hidden></button>
-          <button id="authorize-site" class="button-outline" type="button" hidden>授权当前站点</button>
-          <ul id="site-rule-list" aria-label="站点规则"></ul>
-        </div>
-        <p id="empty-rules" class="empty-rules" hidden>选取后，规则只在此网站生效。</p>
-      </section>
-
-      <section class="card settings-card" aria-label="点击设置">
-        <div class="setting-row">
-          <label for="cooldown">同一元素冷却</label>
-          <span class="number-field">
-            <input id="cooldown" type="number" min="1000" max="300000" step="1000" aria-describedby="cooldown-unit" />
-            <span id="cooldown-unit">ms</span>
-          </span>
-        </div>
-        <div class="actions">
-          <button id="scan-now" class="button-outline" type="button" title="立即在当前页面扫描一次" disabled>立即扫描</button>
-          <button id="save" class="button-tinted" type="button">保存设置</button>
-        </div>
-        <p id="settings-status" class="feedback" role="status"></p>
-      </section>
-
-      <footer class="page-stat">
-        <span id="click-count" hidden></span>
-        <span id="total-click-count" hidden></span>
-      </footer>
-    </main>
-    <script src="site-rules.js"></script>
-    <script src="popup.js"></script>
+    <div id="root"></div>
+    <script type="module" src="./src/popup.jsx"></script>
   </body>
 </html>

@@ -3,6 +3,7 @@ var SITE_SELECTORS_PREFIX = "siteSelectors:";
 var SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
 var SITE_PAUSED_PREFIX = "sitePaused:";
 var SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
+var SITE_LAST_CLICK_TIMES_PREFIX = "siteLastClickTimes:";
 var TOTAL_CLICK_COUNT_KEY = "totalClickCount";
 var RULE_NAME_MAX_LENGTH = 80;
 var RULE_BACKUP_FORMAT = "selector-clicker-rules";
@@ -38,6 +39,10 @@ function sitePausedKey(hostname) {
 
 function siteClickCountsKey(hostname) {
   return SITE_CLICK_COUNTS_PREFIX + hostname;
+}
+
+function siteLastClickTimesKey(hostname) {
+  return SITE_LAST_CLICK_TIMES_PREFIX + hostname;
 }
 
 function ruleSelectorKey(selector) {

@@ -1,0 +1,63 @@
+html::-webkit-scrollbar,
+.popup-rule-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+html::-webkit-scrollbar-track,
+.popup-rule-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html::-webkit-scrollbar-thumb,
+.popup-rule-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #aac2dd content-box;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+.popup-rule-list::-webkit-scrollbar-thumb:hover {
+  background-color: #719bc6;
+}
+
+.popup-rule[data-expanded="true"] {
+  border-color: #b8d0ed;
+  background: #eef5ff;
+}
+
+.popup-rule-actions {
+  position: absolute;
+  top: 50%;
+  right: 2.125rem;
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  padding-left: 1.125rem;
+  background: linear-gradient(to right, transparent, #eef5ff 1.125rem);
+  clip-path: inset(-4px 0 -4px 100%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%);
+  transition: clip-path 160ms ease-out, opacity 120ms ease-out, visibility 160ms;
+}
+
+.popup-rule[data-expanded="true"] .popup-rule-actions {
+  clip-path: inset(-4px 0);
+  opacity: 1;
+  visibility: visible;
+}
+
+.popup-rule-actions > button {
+  padding-inline: 0.375rem;
+}
+
+.popup-rule-actions > button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-rule-actions {
+    transition: none;
+  }
+}

@@ -71,6 +71,10 @@ jobs:
           node-version: '22'
           package-manager-cache: false
 
+      - name: Install build dependencies
+        if: steps.version.outputs.version != ''
+        run: npm ci
+
       - name: Run tests
         if: steps.version.outputs.version != ''
         run: npm test
@@ -81,6 +85,7 @@ jobs:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
           archive="$RUNNER_TEMP/selector-clicker-$BUILD_VERSION.zip"
+          npm run build
           python3 scripts/package-chrome.py "$archive"
           python3 -m zipfile -t "$archive"
 

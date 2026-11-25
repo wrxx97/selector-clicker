@@ -26,7 +26,9 @@
 
 ## 📦 安装
 
-1. 从 [GitHub Releases](https://github.com/wrxx97/selector-clicker/releases) 下载 `selector-clicker-<版本>.zip` 并解压，也可以克隆本仓库。
+需要 Chrome 或 Microsoft Edge 111 及以上版本。
+
+1. 从 [GitHub Releases](https://github.com/wrxx97/selector-clicker/releases) 下载 `selector-clicker-<版本>.zip` 并解压。如果使用源码，请先按下方步骤构建。
 2. 在 Chrome 打开 `chrome://extensions`，或在 Edge 打开 `edge://extensions`。
 3. 开启「开发者模式」，选择「加载已解压的扩展程序」（Load unpacked），然后选中包含 `manifest.json` 的目录。
 4. 打开或刷新目标网页，再通过浏览器工具栏打开 **Selector Clicker**。
@@ -50,7 +52,7 @@
 
 在管理页点击「导出文件」保存 JSON 备份，或点击「复制规则 JSON」将同一份内容复制到剪贴板。通过「导入文件」或「粘贴 JSON」可以预览新规则和重复规则，再确认导入。导入保留现有规则和统计，站点权限可在对应页面单独授予。
 
-弹窗显示本页点击次数和本机累计次数，管理页还会显示每条规则的累计次数。统计从此版本开始，保存在当前浏览器的本地存储中。编辑规则时保留原计数，移除规则前已触发的点击仍计入本机累计次数。
+弹窗显示本页点击次数和本机累计次数。管理页还显示每条规则的累计次数和上次点击时间。统计保存在当前浏览器，编辑规则后仍保留，移除规则前已触发的点击仍计入本机累计次数。上次点击时间从新版启用后开始记录，导出的规则 JSON 只包含规则和执行条件。
 
 ## 🔎 常见问题
 
@@ -72,15 +74,15 @@
 
 ## 🧪 开发与测试
 
-测试仅依赖 Node.js 18 或更高版本。在项目目录运行以下任一命令。
+弹窗和规则管理页使用 React、Vite、shadcn/ui、Tailwind CSS v4、Motion 和 Zustand。建议使用 Node.js 22.12 或更高的 LTS 版本。在项目目录运行：
 
 ```powershell
+npm ci
 npm test
+npm run build
 ```
 
-```powershell
-node --test
-```
+构建后，从浏览器扩展管理页加载 `dist/`。使用 `npm run dev` 可在编辑时自动重建，重建完成后可在浏览器里重新加载扩展。
 
 测试覆盖按站点执行、匹配歧义、页面变化触发、点击冷却、规则移除和旧版全局规则停用。
 
@@ -92,7 +94,7 @@ node --test
 
 将新版本推送到 `main` 后，测试和打包通过时会创建对应的 `v<版本>` 标签和 [GitHub Release](https://github.com/wrxx97/selector-clicker/releases)，并附上同一个 ZIP 和 [更新日志](CHANGELOG.md) 中对应版本的内容。其他分支和手动运行提供 Actions 构建产物。
 
-本地也可以用 Python 3 打包。
+本地构建后，可使用 Python 3.10 或更新版本将 `dist/` 打成 ZIP。
 
 ```powershell
 python scripts/package-chrome.py selector-clicker-1.1.0.zip

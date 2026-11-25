@@ -5,7 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function createWorker() {
+function createWorker(now = Date.now) {
   const store = new Map();
   const local = new Map();
   const grantedOrigins = new Set();
@@ -33,6 +33,7 @@ function createWorker() {
   }
   context = vm.createContext({
     URL,
+    Date: { now },
     crypto,
     importScripts: loadScript,
     chrome: {
@@ -69,6 +70,10 @@ function createWorker() {
     get registered() { return registered; },
     onPermissionsAdded: (origins) => permissionsAdded({ origins }),
     onPermissionsRemoved: () => permissionsRemoved(),
+    backup() {
+      const create = vm.runInContext("(stored) => createRuleBackup(getRuleSites(stored))", context);
+      return structuredClone(create(Object.fromEntries([...store, ...local])));
+    },
     send(message, sender = {}) {
       return new Promise((resolve) => {
         onMessage(message, sender, (response) => resolve(structuredClone(response)));
@@ -300,4 +305,39 @@ test("clicks accumulate locally across tabs and remain associated after a legacy
   await record("example.com", 2, [rule.id]);
   assert.equal(worker.local.get("totalClickCount"), 5);
   assert.equal(worker.local.get("siteClickCounts:example.com")[`rule:${ruleId}`], 3);
+});
+
+test("records the latest click time locally by rule ID and omits it from backups", async () => {
+  const firstClick = Date.UTC(2026, 10, 25, 8, 0);
+  const laterClick = firstClick + 60000;
+  let now = firstClick;
+  const worker = createWorker(() => now);
+  const hostname = "example.com";
+  const selector = "#close";
+  const id = "selector:#close";
+  const key = `rule:${id}`;
+  const times = "siteLastClickTimes:example.com";
+  worker.store.set("siteSelectors:example.com", [selector]);
+  worker.local.set("siteClickCounts:example.com", { [key]: 3 });
+  assert.equal(worker.local.has(times), false);
+  const record = (tabId, host = hostname) => worker.send(
+    { type: "click-record", ruleIds: [id] }, { url: `https://${host}/`, tab: { id: tabId } }
+  );
+  const first = record(1);
+  now = laterClick;
+  const second = record(2);
+  now = firstClick + 500;
+  await Promise.all([first, second, record(3, "other.example")]);
+  assert.equal(worker.local.get("siteClickCounts:example.com")[key], 5);
+  assert.equal(worker.local.get(times)[key], laterClick);
+  assert.equal(worker.local.get("siteLastClickTimes:other.example")[key], now);
+  assert.equal(worker.store.has(times), false);
+
+  await worker.send({ type: "edit-site-selector", hostname, selector, replacement: "#new", expectedId: id });
+  const saved = worker.store.get("siteRuleDetails:example.com")["selector:#new"];
+  assert.equal(saved.id, id);
+  assert.equal(worker.local.get(times)[`rule:${saved.id}`], laterClick);
+  assert.deepEqual(worker.backup().sites[0].rules, [
+    { selector: "#new", name: "", paused: false, pathPrefix: "", maxClicks: 0 }
+  ]);
 });
