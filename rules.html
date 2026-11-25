@@ -23,6 +23,11 @@
       <div class="toolbar">
         <input id="rule-search" type="search" aria-label="搜索网站、备注或选择器" placeholder="搜索网站、备注或选择器" spellcheck="false" />
         <p id="rule-summary" class="summary" role="status">正在读取规则…</p>
+        <div class="backup-actions">
+          <button id="import-rules" type="button">导入</button>
+          <button id="export-rules" type="button">导出</button>
+          <input id="backup-file" type="file" accept=".json,application/json" hidden />
+        </div>
       </div>
       <p id="notice" class="notice" role="status"></p>
       <div id="site-groups" class="site-groups"></div>
@@ -77,6 +82,19 @@
         <div class="dialog-actions">
           <button id="cancel-action" type="button">取消</button>
           <button id="confirm-action" class="primary" type="submit"></button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="import-dialog" aria-labelledby="import-title" aria-describedby="import-summary">
+      <form id="import-form">
+        <h2 id="import-title">预览导入规则</h2>
+        <p id="import-summary" class="dialog-site"></p>
+        <ul id="import-preview"></ul>
+        <p id="import-error" class="dialog-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancel-import" type="button">取消</button>
+          <button id="confirm-import" class="primary" type="submit">导入新增规则</button>
         </div>
       </form>
     </dialog>

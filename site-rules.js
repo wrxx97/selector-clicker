@@ -4,6 +4,7 @@ const SITE_PAUSED_PREFIX = "sitePaused:";
 const SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
 const TOTAL_CLICK_COUNT_KEY = "totalClickCount";
 const RULE_NAME_MAX_LENGTH = 80;
+const RULE_BACKUP_FORMAT = "selector-clicker-rules";
 
 function getSiteHostname(url) {
   try {
@@ -52,5 +53,63 @@ function getSiteRules(stored, hostname) {
     const name = typeof detail?.name === "string" ? detail.name : "";
     const options = getExecutionOptions(detail?.pathPrefix, detail?.maxClicks) || getExecutionOptions();
     return { selector, id, name, paused: detail?.paused === true, ...options };
+  });
+}
+
+function getRuleSites(stored) {
+  const sites = [];
+  for (const key of Object.keys(stored)) {
+    if (!key.startsWith(SITE_SELECTORS_PREFIX)) continue;
+    const hostname = key.slice(SITE_SELECTORS_PREFIX.length);
+    const rules = getSiteRules(stored, hostname);
+    if (hostname && rules.length) sites.push({ hostname, rules, paused: stored[sitePausedKey(hostname)] === true });
+  }
+  return sites.sort((first, second) => first.hostname.localeCompare(second.hostname));
+}
+
+function createRuleBackup(stored) {
+  const sites = getRuleSites(stored).map(({ hostname, paused, rules }) => ({
+    hostname,
+    paused,
+    rules: rules.map(({ selector, name, paused, pathPrefix, maxClicks }) => ({ selector, name, paused, pathPrefix, maxClicks }))
+  }));
+  return { format: RULE_BACKUP_FORMAT, version: 1, sites };
+}
+
+function parseRuleBackup(backup, isValidSelector = () => true) {
+  if (backup?.format !== RULE_BACKUP_FORMAT || backup.version !== 1 || !Array.isArray(backup.sites)) {
+    throw new Error("Invalid Selector Clicker backup format");
+  }
+  const hosts = new Set();
+  return backup.sites.map((site) => {
+    const { hostname, paused = false, rules } = site || {};
+    if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
+        typeof paused !== "boolean" || hosts.has(hostname) || !Array.isArray(rules)) {
+      throw new Error("Invalid site in rule backup");
+    }
+    hosts.add(hostname);
+    return { hostname, paused, rules: rules.map((rule) => {
+      const { selector, name = "", paused = false, pathPrefix, maxClicks } = rule || {};
+      const execution = getExecutionOptions(pathPrefix, maxClicks);
+      if (typeof selector !== "string" || !selector.trim() || !isValidSelector(selector) ||
+          typeof name !== "string" || typeof paused !== "boolean" || !execution) {
+        throw new Error("Invalid rule in backup");
+      }
+      return { selector: selector.trim(), name: name.trim().slice(0, RULE_NAME_MAX_LENGTH), paused, ...execution };
+    }) };
+  });
+}
+
+function planRuleImport(stored, sites) {
+  return sites.map((site) => {
+    const existing = getSiteRules(stored, site.hostname);
+    const selectors = new Set(existing.map((rule) => rule.selector.trim()));
+    const added = [];
+    for (const rule of site.rules) {
+      if (selectors.has(rule.selector)) continue;
+      selectors.add(rule.selector);
+      added.push(rule);
+    }
+    return { ...site, existing, added, duplicates: site.rules.length - added.length };
   });
 }

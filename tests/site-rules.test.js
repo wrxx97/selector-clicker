@@ -34,6 +34,7 @@ function createWorker() {
     chrome: {
       action: { setBadgeText() {}, setBadgeBackgroundColor() {} },
       runtime: {
+        getURL: (file) => `chrome-extension://test/${file}`,
         onInstalled: { addListener() {} },
         onMessage: { addListener(listener) { onMessage = listener; } }
       },
@@ -195,6 +196,33 @@ test("validates execution options and retains them when a target is re-picked", 
   assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#new"]), {
     id, name: "Close", pathPrefix: "/dashboard", maxClicks: 1
   });
+});
+
+test("imports a backup atomically, skips duplicates, and preserves existing rule identities", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const sender = { url: "chrome-extension://test/rules.html" };
+  await worker.send({ type: "save-site-selector", selector: "#first", name: "Keep" }, { url: `https://${hostname}/` });
+  const detailsKey = "siteRuleDetails:example.com";
+  const first = structuredClone(worker.store.get(detailsKey)["selector:#first"]);
+  const second = { selector: "#second", name: "Second", paused: true, pathPrefix: "/tasks", maxClicks: 1 };
+  const backup = { format: "selector-clicker-rules", version: 1, sites: [
+    { hostname, paused: true, rules: [{ selector: "#first", name: "Changed" }, second, second] }
+  ] };
+  assert.deepEqual(await worker.send({ type: "import-rules", backup }, sender), {
+    ok: true, addedCount: 1, duplicateCount: 2
+  });
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#first"]), first);
+  assert.equal(worker.store.has("sitePaused:example.com"), false);
+  const { id, ...actual } = worker.store.get(detailsKey)["selector:#second"];
+  const { selector, ...expected } = second;
+  assert.ok(id && id !== first.id);
+  assert.deepEqual(actual, expected);
+  const add = { hostname: "other.example", rules: [{ selector: "#okay" }] };
+  const invalid = { hostname: "invalid.example", rules: [{ selector: "#bad", maxClicks: -1 }] };
+  const broken = { ...backup, sites: [add, invalid] };
+  assert.deepEqual(await worker.send({ type: "import-rules", backup: broken }, sender), { ok: false });
+  assert.equal(worker.store.has("siteSelectors:other.example"), false);
 });
 
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {

@@ -355,3 +355,15 @@ dialog h2 {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.backup-actions {
+  display: flex;
+  gap: 3px;
+}
+
+#import-preview {
+  max-height: 210px;
+  overflow-y: auto;
+  padding-inline-start: 22px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

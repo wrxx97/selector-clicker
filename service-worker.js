@@ -109,12 +109,49 @@ function recordClickStats(hostname, ruleIds) {
   return update;
 }
 
+function importRules(backup) {
+  const update = siteRuleUpdates.then(async () => {
+    const sites = parseRuleBackup(backup);
+    const defaults = {};
+    for (const { hostname } of sites) {
+      defaults[siteSelectorsKey(hostname)] = [];
+      defaults[siteRuleDetailsKey(hostname)] = {};
+    }
+    const stored = await chrome.storage.sync.get(defaults);
+    const changes = {};
+    let addedCount = 0;
+    let duplicateCount = 0;
+    for (const { hostname, paused, existing, added, duplicates } of planRuleImport(stored, sites)) {
+      addedCount += added.length;
+      duplicateCount += duplicates;
+      if (!added.length) continue;
+      const selectorsKey = siteSelectorsKey(hostname);
+      const detailsKey = siteRuleDetailsKey(hostname);
+      changes[selectorsKey] = [...existing.map((rule) => rule.selector), ...added.map((rule) => rule.selector)];
+      changes[detailsKey] = { ...stored[detailsKey] };
+      for (const { selector, ...details } of added) {
+        changes[detailsKey][ruleSelectorKey(selector)] = { ...details, id: crypto.randomUUID() };
+      }
+      if (!existing.length && paused) changes[sitePausedKey(hostname)] = true;
+    }
+    if (addedCount) await chrome.storage.sync.set(changes);
+    return { ok: true, addedCount, duplicateCount };
+  });
+  siteRuleUpdates = update.catch(() => {});
+  return update;
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get(DEFAULTS);
   await chrome.storage.sync.set(existing);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "import-rules") {
+    if (sender.url !== chrome.runtime.getURL("rules.html")) return;
+    importRules(message.backup).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   if (message.type === "click-record" && sender.tab?.id != null) {
     const text = String(message.totalClicks || "");
     chrome.action.setBadgeText({ tabId: sender.tab.id, text });
