@@ -68,3 +68,23 @@ node --test
 ```
 
 测试覆盖按站点执行、匹配歧义、页面变化触发、点击冷却、规则移除和旧版全局规则停用。
+
+## 🚀 Chrome 商店发布
+
+在仓库的 **Actions → Chrome Web Store release → Run workflow** 手动运行。默认执行测试并生成 ZIP。在运行详情的 **Artifacts** 中下载 `selector-clicker.zip`，可以直接上传到商店。
+
+首次上架时，将 ZIP 上传到 Chrome 商店开发者后台的新项目，填写商店资料和隐私信息并完成首版发布。后续发版前提升 `manifest.json` 的版本号，在运行工作流时从 `main` 勾选 **submit_for_review**。审核通过后，在商店后台手动发布。 [Chrome 开发者后台](https://chrome.google.com/webstore/devconsole) · [Chrome 商店 API](https://developer.chrome.com/docs/webstore/using-api)
+
+启用提交审核前，在 Google Cloud 项目中启用 Chrome Web Store API，并在商店后台授权服务账号。然后在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 配置以下值。 [服务账号配置](https://developer.chrome.com/docs/webstore/service-accounts)
+
+| 类型 | 名称 | 值 |
+| --- | --- | --- |
+| Variable | `CWS_PUBLISHER_ID` | 商店后台 **Publisher → Settings** 中的发布者 ID |
+| Variable | `CWS_ITEM_ID` | 商店项目 **Package** 页的 Item ID |
+| Secret | `CWS_SERVICE_ACCOUNT_JSON` | Google Cloud 下载的服务账号 JSON 密钥内容 |
+
+本地也可以用 Python 3 生成同样的上传包。
+
+```powershell
+python scripts/package-chrome.py selector-clicker.zip
+```
