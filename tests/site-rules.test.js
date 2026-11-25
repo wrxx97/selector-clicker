@@ -179,6 +179,24 @@ test("preserves a paused rule through an edit and isolates the site pause", asyn
   assert.equal(worker.store.get(detailsKey)["selector:#other"].paused, true);
 });
 
+test("validates execution options and retains them when a target is re-picked", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const sender = { url: `https://${hostname}/` };
+  await worker.send({ type: "save-site-selector", selector: "#close", name: "Close" }, sender);
+  const detailsKey = "siteRuleDetails:example.com";
+  const { id } = worker.store.get(detailsKey)["selector:#close"];
+  const edit = { type: "edit-site-selector", hostname, selector: "#close", replacement: "#close" };
+  assert.deepEqual(await worker.send({ ...edit, pathPrefix: "https://example.com/", maxClicks: 1 }), { ok: false });
+  assert.deepEqual(await worker.send({ ...edit, pathPrefix: "/", maxClicks: 1.2 }), { ok: false });
+  assert.equal((await worker.send({ ...edit, pathPrefix: "/dashboard/", maxClicks: 1 })).ok, true);
+  const request = { type: "replace-picked-selector", selector: "#close", replacement: "#new", expectedId: id };
+  assert.equal((await worker.send(request, sender)).ok, true);
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#new"]), {
+    id, name: "Close", pathPrefix: "/dashboard", maxClicks: 1
+  });
+});
+
 test("clicks accumulate locally across tabs and remain associated after a legacy rule is edited", async () => {
   const worker = createWorker();
   const ruleId = "selector:#close";

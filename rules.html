@@ -47,6 +47,7 @@
         <div class="rule-details">
           <strong class="rule-name" hidden></strong>
           <code></code>
+          <span class="rule-conditions" hidden></span>
         </div>
         <div class="row-actions">
           <span class="rule-click-count" title="本机累计自动点击次数"></span>
@@ -66,6 +67,10 @@
           <input id="name-input" type="text" />
           <label for="selector-input">CSS 选择器</label>
           <textarea id="selector-input" rows="3" spellcheck="false"></textarea>
+          <label for="path-prefix">生效路径（选填）</label>
+          <input id="path-prefix" type="text" placeholder="例如 /dashboard，留空则全站生效" spellcheck="false" />
+          <label for="max-clicks">每次页面加载最多点击</label>
+          <input id="max-clicks" type="number" min="0" step="1" placeholder="0 表示不限次数" />
         </div>
         <code id="selector-preview" hidden></code>
         <p id="dialog-error" class="dialog-error" role="alert"></p>

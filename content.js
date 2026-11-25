@@ -15,6 +15,7 @@
   let ruleHighlight;
   let siteRules = [];
   const lastClicks = new WeakMap();
+  const ruleClicks = new Map();
   const picker = createElementPicker(async (selector, name, editing) => {
     const message = editing
       ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
@@ -70,8 +71,18 @@
         { outline: "3px solid transparent", outlineOffset: "5px" }
       ], { duration: 2400, easing: "ease-in" });
     }
-    const pauseStatus = config[pausedKey] ? "site-paused" : rule.paused ? "rule-paused" : status;
-    return { status: pauseStatus, count };
+    return { status: ruleRestriction(rule) || status, count };
+  }
+
+  function ruleRestriction(rule) {
+    if (config[pausedKey]) return "site-paused";
+    if (rule.paused) return "rule-paused";
+    if (rule.pathPrefix) {
+      const path = new URL(location.href).pathname;
+      if (path !== rule.pathPrefix && !path.startsWith(`${rule.pathPrefix}/`)) return "out-of-scope";
+    }
+    if (rule.maxClicks && (ruleClicks.get(rule.id) || 0) >= rule.maxClicks) return "limit-reached";
+    return "";
   }
 
   function automaticClickEnabled() {
@@ -82,14 +93,15 @@
     if (!automaticClickEnabled() || picker.active) return;
 
     const ruleIds = [];
-    for (const { selector, id, paused } of siteRules) {
-      if (paused) continue;
-      const { status, target } = inspectRule(selector);
+    for (const rule of siteRules) {
+      if (ruleRestriction(rule)) continue;
+      const { status, target } = inspectRule(rule.selector);
       if (status !== "ready") continue;
       lastClicks.set(target, Date.now());
       target.click();
+      ruleClicks.set(rule.id, (ruleClicks.get(rule.id) || 0) + 1);
       totalClicks += 1;
-      ruleIds.push(id);
+      ruleIds.push(rule.id);
     }
     if (ruleIds.length) {
       chrome.runtime.sendMessage({ type: "click-record", totalClicks, ruleIds });
@@ -124,6 +136,7 @@
   }
 
   const observer = new MutationObserver(scheduleScan);
+  window.navigation?.addEventListener("currententrychange", scheduleScan);
 
   chrome.storage.sync.get(DEFAULTS).then(applyConfig);
   chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -135,16 +148,18 @@
       changedConfig[key] = changes[key].newValue ?? DEFAULTS[key];
     }
     if (changedKeys.length === 1 && changedKeys[0] === detailsKey) {
-      const pauseChanged = siteRules.some((rule) => rule.paused !==
-        (changedConfig[detailsKey]?.[ruleSelectorKey(rule.selector)]?.paused === true));
-      if (!pauseChanged) {
+      const nextRules = getSiteRules(changedConfig, hostname);
+      const executionChanged = siteRules.some((rule, index) => {
+        const next = nextRules[index];
+        return rule.paused !== next.paused || rule.pathPrefix !== next.pathPrefix || rule.maxClicks !== next.maxClicks;
+      });
+      if (!executionChanged) {
         config = changedConfig;
-        siteRules = getSiteRules(config, hostname);
+        siteRules = nextRules;
         return;
       }
-      const resumed = siteRules.some((rule) => rule.paused &&
-        changedConfig[detailsKey]?.[ruleSelectorKey(rule.selector)]?.paused !== true);
-      applyConfig(changedConfig, resumed);
+      const ruleBecameRunnable = siteRules.some((rule, index) => ruleRestriction(rule) && !ruleRestriction(nextRules[index]));
+      applyConfig(changedConfig, ruleBecameRunnable);
       return;
     }
     applyConfig(changedConfig);

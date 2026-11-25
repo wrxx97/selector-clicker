@@ -409,3 +409,24 @@ test("pauses one rule independently and disconnects scans while the site is paus
   update({ "sitePaused:example.com": { newValue: false } });
   assert.equal(pausedButton.state.clicks, 1);
 });
+
+test("enforces a segment-safe path prefix and a page limit when the target is replaced", async () => {
+  const first = createElement();
+  const second = createElement();
+  const matches = [first];
+  const config = {
+    enabled: true,
+    [siteKey]: ["#close"],
+    "siteRuleDetails:example.com": { "selector:#close": { pathPrefix: "/dashboard/", maxClicks: 1 } }
+  };
+  await startContentScript({ config, url: "https://example.com/dashboard-archive", elementsBySelector: { "#close": matches } });
+  assert.equal(first.state.clicks, 0);
+  const app = await startContentScript({ config, url: "https://example.com/dashboard/view", elementsBySelector: { "#close": matches } });
+  assert.equal(first.state.clicks, 1);
+  matches[0] = second;
+  sendMessage(app.runtimeListeners[0], { type: "scan-now" });
+  assert.equal(second.state.clicks, 0);
+  assert.equal(sendMessage(app.runtimeListeners[0], {
+    type: "test-rule", hostname: "example.com", selector: "#close"
+  }).status, "limit-reached");
+});

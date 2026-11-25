@@ -34,6 +34,13 @@ function ruleSelectorKey(selector) {
   return `selector:${selector}`;
 }
 
+function getExecutionOptions(pathPrefix = "", maxClicks = 0) {
+  if (typeof pathPrefix !== "string" || !Number.isSafeInteger(maxClicks) || maxClicks < 0) return null;
+  const path = pathPrefix.trim();
+  if (path && !/^\/(?!\/)[^?#\\\s]*$/.test(path)) return null;
+  return { pathPrefix: path.replace(/\/+$/, ""), maxClicks };
+}
+
 function getSiteRules(stored, hostname) {
   const selectors = stored[siteSelectorsKey(hostname)];
   if (!Array.isArray(selectors)) return [];
@@ -43,6 +50,7 @@ function getSiteRules(stored, hostname) {
     const detail = details?.[key];
     const id = typeof detail?.id === "string" && detail.id ? detail.id : key;
     const name = typeof detail?.name === "string" ? detail.name : "";
-    return { selector, id, name, paused: detail?.paused === true };
+    const options = getExecutionOptions(detail?.pathPrefix, detail?.maxClicks) || getExecutionOptions();
+    return { selector, id, name, paused: detail?.paused === true, ...options };
   });
 }

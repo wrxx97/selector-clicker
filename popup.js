@@ -141,6 +141,8 @@ async function testSiteRule(selector, button) {
     cooldown: "匹配的元素仍在点击冷却中。",
     "site-paused": "当前站点已暂停。",
     "rule-paused": "这条规则已暂停。",
+    "out-of-scope": "当前页面路径不在规则的生效范围内。",
+    "limit-reached": "这条规则已达到本页点击上限。",
     invalid: "CSS 选择器格式无效。"
   };
   button.disabled = true;

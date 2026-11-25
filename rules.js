@@ -16,6 +16,8 @@ const elements = {
   editor: document.querySelector("#selector-editor"),
   name: document.querySelector("#name-input"),
   input: document.querySelector("#selector-input"),
+  pathPrefix: document.querySelector("#path-prefix"),
+  maxClicks: document.querySelector("#max-clicks"),
   preview: document.querySelector("#selector-preview"),
   error: document.querySelector("#dialog-error"),
   cancel: document.querySelector("#cancel-action"),
@@ -53,6 +55,12 @@ function createGroup(hostname, rules, sitePaused) {
     const label = row.querySelector(".rule-name");
     label.textContent = name;
     label.hidden = !name;
+    const conditions = row.querySelector(".rule-conditions");
+    conditions.textContent = [
+      rule.pathPrefix && `路径 ${rule.pathPrefix}`,
+      rule.maxClicks && `每页最多 ${rule.maxClicks} 次`
+    ].filter(Boolean).join(" · ");
+    conditions.hidden = !conditions.textContent;
     clickCountElements.push({ hostname, id, node: row.querySelector(".rule-click-count") });
     const edit = row.querySelector(".edit-rule");
     const pause = row.querySelector(".toggle-rule-pause");
@@ -153,14 +161,16 @@ async function loadClickStats() {
   }
 }
 
-function openRuleDialog(hostname, { selector, name }, remove) {
-  pendingAction = { hostname, selector, remove };
+function openRuleDialog(hostname, { selector, name, id, pathPrefix, maxClicks }, remove) {
+  pendingAction = { hostname, selector, id, remove };
   setNotice("");
   elements.title.textContent = remove ? "移除这条规则？" : "编辑规则";
   elements.site.textContent = remove && name ? `${hostname} · ${name}` : hostname;
   elements.editor.hidden = remove;
   elements.input.value = remove ? "" : selector;
   elements.name.value = remove ? "" : name;
+  elements.pathPrefix.value = remove ? "" : pathPrefix;
+  elements.maxClicks.value = remove || !maxClicks ? "" : maxClicks;
   elements.preview.hidden = !remove;
   elements.preview.textContent = remove ? selector : "";
   elements.error.textContent = "";
@@ -184,11 +194,15 @@ function validateReplacement(selector) {
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (saving || !pendingAction) return;
-  const { hostname, selector, remove } = pendingAction;
+  const { hostname, selector, id, remove } = pendingAction;
   const replacement = elements.input.value;
-  elements.error.textContent = remove ? "" : validateReplacement(replacement);
+  const execution = getExecutionOptions(elements.pathPrefix.value, Number(elements.maxClicks.value));
+  const selectorError = remove ? "" : validateReplacement(replacement);
+  elements.error.textContent = selectorError || (!remove && !execution
+    ? "请输入以 / 开头的网页路径（不含查询参数）和非负整数点击次数。"
+    : "");
   if (elements.error.textContent) {
-    elements.input.focus();
+    (selectorError ? elements.input : elements.pathPrefix).focus();
     return;
   }
   saving = true;
@@ -196,14 +210,18 @@ elements.form.addEventListener("submit", async (event) => {
   elements.cancel.disabled = true;
   elements.input.readOnly = true;
   elements.name.readOnly = true;
+  elements.pathPrefix.readOnly = true;
+  elements.maxClicks.readOnly = true;
   const failure = remove ? "移除规则失败，请重试。" : "保存修改失败，请重试。";
   try {
     const response = await chrome.runtime.sendMessage({
       type: remove ? "remove-site-selector" : "edit-site-selector",
       hostname,
       selector,
+      expectedId: id,
       replacement,
-      name: elements.name.value
+      name: elements.name.value,
+      ...execution
     });
     if (!response?.ok) {
       if (response?.reason === "duplicate") elements.error.textContent = "此网站已有相同的选择器。";
@@ -222,6 +240,8 @@ elements.form.addEventListener("submit", async (event) => {
     elements.cancel.disabled = false;
     elements.input.readOnly = false;
     elements.name.readOnly = false;
+    elements.pathPrefix.readOnly = false;
+    elements.maxClicks.readOnly = false;
   }
 });
 
