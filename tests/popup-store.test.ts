@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { compileRuntimeScript } from "../src/build/runtime-scripts";
 import { test } from "node:test";
 import { runInThisContext } from "node:vm";
 import type { PageRequest, StoredValues, WorkerRequest } from "../src/lib/extension-types";
 
 test("popup keeps rule and settings references stable on click updates and refreshes only affected rules", async () => {
-  runInThisContext(readFileSync(new URL("../site-rules.js", import.meta.url), "utf8"));
+  runInThisContext(compileRuntimeScript("site-rules.js"));
   const hostname = "example.com";
   const selectorsKey = `siteSelectors:${hostname}`;
   const detailsKey = `siteRuleDetails:${hostname}`;

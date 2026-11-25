@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import test from "node:test";
-import { getAccessToken, submitForReview, type StoreRequestOptions } from "../scripts/submit-chrome.mjs";
+import { getAccessToken, submitForReview, type StoreRequestOptions } from "../src/build/submit-chrome";
 
 const release = {
   archive: Buffer.from("test zip"),

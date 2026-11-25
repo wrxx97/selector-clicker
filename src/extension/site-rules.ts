@@ -1,3 +1,24 @@
+type RuntimeRule = import("../lib/extension-types").Rule;
+type RuntimeRuleSite = import("../lib/extension-types").RuleSite;
+type RuntimeStored = import("../lib/extension-types").StoredValues;
+type RuntimeBackup = import("../lib/extension-types").RuleBackup;
+type RuntimeBackupSite = import("../lib/extension-types").BackupSite;
+type RuntimeImportSite = import("../lib/extension-types").ImportSite;
+type RuntimeExecution = Pick<RuntimeRule, "pathPrefix" | "maxClicks">;
+type RuntimeRuleDetails = Record<string, Partial<Omit<RuntimeRule, "selector">>>;
+
+function recordValues(value: unknown): RuntimeStored {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as RuntimeStored : {};
+}
+
+function storageStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function ruleDetails(value: unknown): RuntimeRuleDetails {
+  return recordValues(value) as RuntimeRuleDetails;
+}
+
 // These shared scripts can be injected twice when a tab finishes loading during authorization.
 var SITE_SELECTORS_PREFIX = "siteSelectors:";
 var SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
@@ -10,7 +31,8 @@ var RULE_BACKUP_FORMAT = "selector-clicker-rules";
 var AUTHORIZED_SITES_KEY = "authorizedSitePatterns";
 var SITE_SCRIPT_FILES = ["site-rules.js", "picker.js", "content.js"];
 
-function getSiteHostname(url) {
+function getSiteHostname(url: unknown) {
+  if (typeof url !== "string") return "";
   try {
     const address = new URL(url);
     return address.protocol === "http:" || address.protocol === "https:" ? address.hostname : "";
@@ -19,7 +41,7 @@ function getSiteHostname(url) {
   }
 }
 
-function normalizeSiteHostname(value) {
+function normalizeSiteHostname(value: unknown) {
   if (typeof value !== "string") return "";
   const input = value.trim();
   if (!input || /[\s/?#@\\*%]/.test(input)) return "";
@@ -27,59 +49,59 @@ function normalizeSiteHostname(value) {
   return getSiteHostname("https://" + input);
 }
 
-function getSiteAccessPattern(url) {
+function getSiteAccessPattern(url: unknown) {
+  if (typeof url !== "string") return "";
   const hostname = getSiteHostname(url);
   if (!hostname || hostname.includes("*")) return "";
   return `${new URL(url).protocol}//${hostname}/*`;
 }
 
-function siteSelectorsKey(hostname) {
+function siteSelectorsKey(hostname: string) {
   return SITE_SELECTORS_PREFIX + hostname;
 }
 
-function siteRuleDetailsKey(hostname) {
+function siteRuleDetailsKey(hostname: string) {
   return SITE_RULE_DETAILS_PREFIX + hostname;
 }
 
-function sitePausedKey(hostname) {
+function sitePausedKey(hostname: string) {
   return SITE_PAUSED_PREFIX + hostname;
 }
 
-function siteClickCountsKey(hostname) {
+function siteClickCountsKey(hostname: string) {
   return SITE_CLICK_COUNTS_PREFIX + hostname;
 }
 
-function siteLastClickTimesKey(hostname) {
+function siteLastClickTimesKey(hostname: string) {
   return SITE_LAST_CLICK_TIMES_PREFIX + hostname;
 }
 
-function ruleSelectorKey(selector) {
+function ruleSelectorKey(selector: string) {
   return `selector:${selector}`;
 }
 
-function getExecutionOptions(pathPrefix = "", maxClicks = 0) {
-  if (typeof pathPrefix !== "string" || !Number.isSafeInteger(maxClicks) || maxClicks < 0) return null;
+function getExecutionOptions(pathPrefix: unknown = "", maxClicks: unknown = 0): RuntimeExecution | null {
+  if (typeof pathPrefix !== "string" || typeof maxClicks !== "number" || !Number.isSafeInteger(maxClicks) || maxClicks < 0) return null;
   const path = pathPrefix.trim();
   if (path && !/^\/(?!\/)[^?#\\\s]*$/.test(path)) return null;
   return { pathPrefix: path.replace(/\/+$/, ""), maxClicks };
 }
 
-function getSiteRules(stored, hostname) {
-  const selectors = stored[siteSelectorsKey(hostname)];
-  if (!Array.isArray(selectors)) return [];
-  const details = stored[siteRuleDetailsKey(hostname)];
+function getSiteRules(stored: RuntimeStored, hostname: string): RuntimeRule[] {
+  const selectors = storageStrings(stored[siteSelectorsKey(hostname)]);
+  const details = ruleDetails(stored[siteRuleDetailsKey(hostname)]);
   const legacyPaused = stored[sitePausedKey(hostname)] === true;
-  return selectors.filter((selector) => typeof selector === "string" && selector.trim()).map((selector) => {
+  return selectors.filter((selector) => selector.trim()).map((selector) => {
     const key = ruleSelectorKey(selector);
     const detail = details?.[key];
     const id = typeof detail?.id === "string" && detail.id ? detail.id : key;
     const name = typeof detail?.name === "string" ? detail.name : "";
-    const options = getExecutionOptions(detail?.pathPrefix, detail?.maxClicks) || getExecutionOptions();
+    const options = getExecutionOptions(detail?.pathPrefix, detail?.maxClicks) || { pathPrefix: "", maxClicks: 0 };
     return { selector, id, name, paused: legacyPaused || detail?.paused === true, ...options };
   });
 }
 
-function getRuleSites(stored) {
+function getRuleSites(stored: RuntimeStored): RuntimeRuleSite[] {
   const sites = [];
   for (const key of Object.keys(stored)) {
     if (!key.startsWith(SITE_SELECTORS_PREFIX)) continue;
@@ -90,7 +112,7 @@ function getRuleSites(stored) {
   return sites.sort((first, second) => first.hostname.localeCompare(second.hostname));
 }
 
-function createRuleBackup(ruleSites) {
+function createRuleBackup(ruleSites: RuntimeRuleSite[]): RuntimeBackup {
   const sites = ruleSites.map(({ hostname, paused, rules }) => ({
     hostname,
     paused,
@@ -99,20 +121,21 @@ function createRuleBackup(ruleSites) {
   return { format: RULE_BACKUP_FORMAT, version: 1, sites };
 }
 
-function parseRuleBackup(backup, isValidSelector = () => true) {
+function parseRuleBackup(input: unknown, isValidSelector: (selector: string) => boolean = () => true): RuntimeBackupSite[] {
+  const backup = recordValues(input);
   if (backup?.format !== RULE_BACKUP_FORMAT || backup.version !== 1 || !Array.isArray(backup.sites)) {
     throw new Error("Invalid Selector Clicker backup format");
   }
   const hosts = new Set();
   return backup.sites.map((site) => {
-    const { hostname, paused: sitePaused = false, rules } = site || {};
+    const { hostname, paused: sitePaused = false, rules } = recordValues(site);
     if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
         typeof sitePaused !== "boolean" || hosts.has(hostname) || !Array.isArray(rules)) {
       throw new Error("Invalid site in rule backup");
     }
     hosts.add(hostname);
     return { hostname, paused: sitePaused, rules: rules.map((rule) => {
-      const { selector, name = "", paused = false, pathPrefix, maxClicks } = rule || {};
+      const { selector, name = "", paused = false, pathPrefix, maxClicks } = recordValues(rule);
       const execution = getExecutionOptions(pathPrefix, maxClicks);
       if (typeof selector !== "string" || !selector.trim() || !isValidSelector(selector) ||
           typeof name !== "string" || typeof paused !== "boolean" || !execution) {
@@ -126,7 +149,7 @@ function parseRuleBackup(backup, isValidSelector = () => true) {
   });
 }
 
-function planRuleImport(stored, sites) {
+function planRuleImport(stored: RuntimeStored, sites: RuntimeBackupSite[]): RuntimeImportSite[] {
   return sites.map((site) => {
     const existing = getSiteRules(stored, site.hostname);
     const selectors = new Set(existing.map((rule) => rule.selector.trim()));

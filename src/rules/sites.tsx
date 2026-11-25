@@ -4,10 +4,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { changePause, siteClickCountsKey, siteLastClickTimesKey } from "@/lib/extension";
-import { useRulesStore } from "@/lib/rules-store";
+import { useRulesStore } from "./store";
 import type { ToastFeedback } from "@/components/ui/toast";
 import type { PauseOptions, Rule, RuleSite } from "@/lib/extension-types";
-import type { OpenManagerDialog } from "./rule-dialogs";
+import type { OpenManagerDialog } from "./dialogs";
 
 const count = new Intl.NumberFormat("zh-CN");
 const clickTime = new Intl.DateTimeFormat("zh-CN", {

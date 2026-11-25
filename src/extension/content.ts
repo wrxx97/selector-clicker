@@ -1,43 +1,52 @@
+declare var selectorClickerContentLoaded: boolean | undefined;
+type ContentPageResponses = import("../lib/extension-types").PageResponses;
+type ClickTarget = Element & { click(): void };
+type RuleInspection =
+  | { status: "ready" | "cooldown"; target: ClickTarget; count?: never }
+  | { status: "disabled"; target: Element; count?: never }
+  | { status: "ambiguous"; count: number; target?: never }
+  | { status: "invalid" | "missing" | "hidden"; count?: never; target?: never };
+
 (() => {
   if (globalThis.selectorClickerContentLoaded) return;
   globalThis.selectorClickerContentLoaded = true;
   const accessPattern = getSiteAccessPattern(location.href);
   const hostname = getSiteHostname(location.href);
-  const siteKey = hostname ? siteSelectorsKey(hostname) : null;
-  const detailsKey = hostname ? siteRuleDetailsKey(hostname) : null;
-  const pausedKey = hostname ? sitePausedKey(hostname) : null;
-  const DEFAULTS = {
+  const siteKey = siteSelectorsKey(hostname);
+  const detailsKey = siteRuleDetailsKey(hostname);
+  const pausedKey = sitePausedKey(hostname);
+  const DEFAULTS: RuntimeStored & { enabled: boolean; cooldown: number } = {
     enabled: false,
     cooldown: 8000,
-    ...(siteKey ? { [siteKey]: [], [detailsKey]: {}, [pausedKey]: false } : {})
+    ...(hostname ? { [siteKey]: [], [detailsKey]: {}, [pausedKey]: false } : {})
   };
 
   let config = { ...DEFAULTS };
-  let mutationTimer = null;
+  let mutationTimer: number | null = null;
   let totalClicks = 0;
   let siteAuthorized = false;
   let initialized = false;
   let authorizationChanged = false;
-  const pendingSettings = {};
-  let ruleHighlight;
-  let siteRules = [];
-  const lastClicks = new WeakMap();
-  const ruleClicks = new Map();
+  const pendingSettings: RuntimeStored = {};
+  let ruleHighlight: Animation | undefined;
+  let siteRules: RuntimeRule[] = [];
+  const lastClicks = new WeakMap<Element, number>();
+  const ruleClicks = new Map<string, number>();
   const picker = createElementPicker(async (selector, name, editing) => {
     if (!siteAuthorized) throw new Error("当前站点的访问权限已撤销。");
     const message = editing
       ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
       : { type: "save-site-selector", selector, name };
-    const response = await chrome.runtime.sendMessage(message);
+    const response: import("../lib/extension-types").WorkerResponse | undefined = await chrome.runtime.sendMessage(message);
     if (response?.ok) return;
-    const errors = {
+    const errors: Record<string, string> = {
       missing: "规则已变更，请重新打开扩展。",
       duplicate: "这个元素已有规则，请选取其他元素。"
     };
-    throw new Error(errors[response?.reason] || "保存失败，请重试。");
+    throw new Error(errors[response?.reason ?? ""] || "保存失败，请重试。");
   }, scheduleScan);
 
-  function isVisible(element) {
+  function isVisible(element: Element) {
     const style = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return (
@@ -49,7 +58,7 @@
     );
   }
 
-  function inspectRule(selector) {
+  function inspectRule(selector: string): RuleInspection {
     let matches;
     try {
       matches = document.querySelectorAll(selector);
@@ -60,15 +69,15 @@
     if (matches.length > 1) return { status: "ambiguous", count: matches.length };
     const [target] = matches;
     if (!target.isConnected || !isVisible(target)) return { status: "hidden" };
-    if (typeof target.click !== "function" || target.matches(":disabled, [aria-disabled='true']")) {
+    if (!("click" in target) || typeof target.click !== "function" || target.matches(":disabled, [aria-disabled='true']")) {
       return { status: "disabled", target };
     }
     const lastClick = lastClicks.get(target);
     const status = lastClick != null && Date.now() - lastClick < config.cooldown ? "cooldown" : "ready";
-    return { status, target };
+    return { status, target: target as ClickTarget };
   }
 
-  function testRule(selector) {
+  function testRule(selector: string): ContentPageResponses["test-rule"] {
     const rule = siteRules.find((item) => item.selector === selector);
     ruleHighlight?.cancel();
     if (!rule) return { status: "removed" };
@@ -82,7 +91,7 @@
     return { status: ruleRestriction(rule) || status, count };
   }
 
-  function ruleRestriction(rule) {
+  function ruleRestriction(rule: RuntimeRule) {
     if (rule.paused) return "rule-paused";
     if (rule.pathPrefix) {
       const path = new URL(location.href).pathname;
@@ -123,7 +132,7 @@
     }, 100);
   }
 
-  function applyConfig(nextConfig, scanImmediately = true) {
+  function applyConfig(nextConfig: RuntimeStored, scanImmediately = true) {
     config = {
       ...DEFAULTS,
       ...nextConfig,
@@ -132,7 +141,7 @@
     const hadRules = siteRules.length > 0;
     siteRules = getSiteRules(config, hostname);
 
-    window.clearTimeout(mutationTimer);
+    if (mutationTimer !== null) window.clearTimeout(mutationTimer);
     mutationTimer = null;
     if (automaticClickEnabled()) {
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
@@ -144,20 +153,20 @@
   }
 
   const observer = new MutationObserver(scheduleScan);
-  window.navigation?.addEventListener("currententrychange", scheduleScan);
+  (window as Window & { navigation?: EventTarget }).navigation?.addEventListener("currententrychange", scheduleScan);
 
   const initialConfig = Promise.all([
     chrome.storage.sync.get(DEFAULTS),
     chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] })
   ]).then(([settings, local]) => {
-    if (!authorizationChanged) siteAuthorized = local[AUTHORIZED_SITES_KEY].includes(accessPattern);
+    if (!authorizationChanged) siteAuthorized = storageStrings(local[AUTHORIZED_SITES_KEY]).includes(accessPattern);
     applyConfig({ ...settings, ...pendingSettings });
     initialized = true;
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && Object.hasOwn(changes, AUTHORIZED_SITES_KEY)) {
       authorizationChanged = true;
-      siteAuthorized = (changes[AUTHORIZED_SITES_KEY].newValue || []).includes(accessPattern);
+      siteAuthorized = storageStrings(changes[AUTHORIZED_SITES_KEY].newValue).includes(accessPattern);
       if (!siteAuthorized) {
         picker.stop();
         ruleHighlight?.cancel();
@@ -177,21 +186,22 @@
       const nextRules = getSiteRules(changedConfig, hostname);
       const executionChanged = siteRules.some((rule, index) => {
         const next = nextRules[index];
-        return rule.paused !== next.paused || rule.pathPrefix !== next.pathPrefix || rule.maxClicks !== next.maxClicks;
+        return !next || rule.paused !== next.paused || rule.pathPrefix !== next.pathPrefix || rule.maxClicks !== next.maxClicks;
       });
       if (!executionChanged) {
-        config = changedConfig;
+        config = { ...config, ...changedConfig };
         siteRules = nextRules;
         return;
       }
-      const ruleBecameRunnable = siteRules.some((rule, index) => ruleRestriction(rule) && !ruleRestriction(nextRules[index]));
+      const ruleBecameRunnable = siteRules.some((rule, index) => nextRules[index] && ruleRestriction(rule) && !ruleRestriction(nextRules[index]));
       applyConfig(changedConfig, ruleBecameRunnable);
       return;
     }
     applyConfig(changedConfig);
   });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((payload: unknown, _sender, sendResponse) => {
+    const message = recordValues(payload);
     if (message.type === "get-status") {
       const status = () => ({
         enabled: config.enabled,
@@ -208,12 +218,12 @@
       scan();
       sendResponse({ totalClicks });
     }
-    if (message.type === "test-rule" && siteAuthorized && message.hostname === hostname) {
+    if (message.type === "test-rule" && typeof message.selector === "string" && siteAuthorized && message.hostname === hostname) {
       sendResponse(testRule(message.selector));
     }
     if (message.type === "start-picker") {
-      const editing = message.selector && siteRules
-        .find((rule) => rule.selector === message.selector && rule.id === message.expectedId);
+      const editing = typeof message.selector === "string" && message.selector ? siteRules
+        .find((rule) => rule.selector === message.selector && rule.id === message.expectedId) : undefined;
       if (!siteAuthorized || !hostname || message.hostname !== hostname || (message.selector && !editing)) {
         sendResponse({ ok: false });
         return;

@@ -1,16 +1,20 @@
+type PickerSession = { host: HTMLElement; controller: AbortController; finish(saved?: boolean): void };
+type PickerSelection = { target: HTMLElement; selector: string };
+type PickerSave = (selector: string, name: string, editing?: RuntimeRule) => Promise<void>;
+
 var PICKER_CONTROL = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [onclick]';
 var PICKER_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "aria-label", "name", "title"];
 
-function getPickerTarget(hit) {
+function getPickerTarget(hit: Element | null) {
   const element = hit?.closest(PICKER_CONTROL) || hit;
   return element instanceof HTMLElement &&
     !element.matches("html, body, iframe, frame") &&
     typeof element.click === "function" ? element : null;
 }
 
-function getPickerSelector(target) {
+function getPickerSelector(target: HTMLElement) {
   let relativePath = "";
-  for (let element = target; element; element = element.parentElement) {
+  for (let element: HTMLElement | null = target; element; element = element.parentElement) {
     const tag = CSS.escape(element.localName);
     const candidates = [];
     if (element.id) candidates.push(`#${CSS.escape(element.id)}`);
@@ -124,10 +128,10 @@ var PICKER_STYLES = `
   button:disabled { opacity: .55; cursor: default; }
 `;
 
-function createElementPicker(saveRule, resumeScan) {
-  let session;
+function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
+  let session: PickerSession | undefined;
 
-  function start(hostname, editing) {
+  function start(hostname: string, editing?: RuntimeRule) {
     if (session?.host.isConnected) return;
     session?.controller.abort();
 
@@ -140,7 +144,7 @@ function createElementPicker(saveRule, resumeScan) {
     const controller = new AbortController();
     const { signal } = controller;
 
-    function createNode(tag, className, text) {
+    function createNode<Tag extends keyof HTMLElementTagNameMap>(tag: Tag, className: string, text?: string) {
       const node = document.createElement(tag);
       node.className = className;
       if (text) node.textContent = text;
@@ -169,14 +173,14 @@ function createElementPicker(saveRule, resumeScan) {
     panel.append(title, status, preview, nameField, actions);
     shadow.append(surface, outline, panel);
 
-    let hovered;
-    let selected;
+    let hovered: HTMLElement | null;
+    let selected: PickerSelection | null;
     let saving = false;
 
     function updateOutline() {
       const target = selected?.target || hovered;
       outline.hidden = !target?.isConnected;
-      if (outline.hidden) return;
+      if (!target?.isConnected) return;
       const { top, left, width, height } = target.getBoundingClientRect();
       Object.assign(outline.style, {
         top: `${top}px`,
@@ -220,7 +224,7 @@ function createElementPicker(saveRule, resumeScan) {
       window.setTimeout(() => host.remove(), 1800);
     }
 
-    function targetAt(event) {
+    function targetAt(event: MouseEvent) {
       surface.style.pointerEvents = "none";
       try {
         return getPickerTarget(document.elementFromPoint(event.clientX, event.clientY));
@@ -240,7 +244,7 @@ function createElementPicker(saveRule, resumeScan) {
       if (selected) return;
       const target = targetAt(event);
       const selector = target && getPickerSelector(target);
-      if (!selector) {
+      if (!target || !selector) {
         status.textContent = "无法定位这个元素，请选取网页主框架中的按钮或链接。";
         return;
       }
@@ -249,6 +253,8 @@ function createElementPicker(saveRule, resumeScan) {
       preview.textContent = selector;
       preview.hidden = false;
       nameField.hidden = false;
+      nameInput.value = editing?.name ||
+        target.innerText.replace(/\s+/g, " ").trim().slice(0, RULE_NAME_MAX_LENGTH).trimEnd();
       actions.hidden = false;
       panel.classList.add("confirming");
       title.textContent = "确认站点规则";
@@ -274,7 +280,7 @@ function createElementPicker(saveRule, resumeScan) {
         await saveRule(selector, nameInput.value, editing);
         if (!signal.aborted) finish(true);
       } catch (error) {
-        status.textContent = error.message || "保存失败，请重试。";
+        status.textContent = error instanceof Error && error.message ? error.message : "保存失败，请重试。";
         for (const button of [cancel, retry, save]) button.disabled = false;
       } finally {
         saving = false;

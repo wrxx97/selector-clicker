@@ -7,13 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Toast, useToast, type ToastFeedback } from "@/components/ui/toast";
 import { MAX_BACKUP_BYTES, exportRuleFile, formatRuleBackup, previewRuleImport } from "@/lib/backup";
 import { TOTAL_CLICK_COUNT_KEY } from "@/lib/extension";
-import { startRules, useRulesStore } from "@/lib/rules-store";
+import { startRules, useRulesStore } from "./store";
 import { startTheme } from "@/lib/theme";
-import { BackupDialog, EditorDialog, SiteDialog, type ManagerDialog, type OpenManagerDialog } from "./rule-dialogs";
-import { CooldownSettings } from "./rule-settings";
-import { RulesList } from "./rule-sites";
+import { BackupDialog, EditorDialog, SiteDialog, type ManagerDialog, type OpenManagerDialog } from "./dialogs";
+import { CooldownSettings } from "./settings";
+import { RulesList } from "./sites";
 import { ThemeSettings } from "./theme-settings";
-import "./theme.css";
+import "../styles/theme.css";
 
 const Settings = memo(CooldownSettings);
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { compileRuntimeScript } from "../src/build/runtime-scripts";
 import test from "node:test";
 import vm from "node:vm";
 import type { PageRequest, PageResponses, StorageChanges, StoredValues } from "../src/lib/extension-types";
@@ -20,9 +20,8 @@ interface ElementState {
   height: number;
 }
 
-const contentScript = ["site-rules.js", "picker.js", "content.js"]
-  .map((file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8"))
-  .join("\n");
+const scripts = ["site-rules.js", "picker.js", "content.js"] as const;
+const contentScript = scripts.map(compileRuntimeScript).join("\n");
 const siteKey = "siteSelectors:example.com";
 
 function createElement(options: Partial<ElementState> = {}) {

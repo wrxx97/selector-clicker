@@ -74,7 +74,7 @@
 
 ## 🧪 开发与测试
 
-弹窗和规则管理页使用 React、Vite、shadcn/ui、Tailwind CSS v4 和 Zustand。弹窗、规则管理页、扩展接口、共享 UI 组件及测试使用 TypeScript。建议使用 Node.js 22.12 或更高的 LTS 版本，pnpm 版本记录在 `package.json`。在项目目录运行以下命令。
+弹窗和规则管理页使用 React、Vite、shadcn/ui、Tailwind CSS v4 和 Zustand。扩展运行脚本、界面、构建工具及测试使用 TypeScript。建议使用 Node.js 22.12 或更高的 LTS 版本，pnpm 版本记录在 `package.json`。在项目目录运行以下命令。
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -85,7 +85,7 @@ pnpm run build
 
 构建后，从浏览器扩展管理页加载 `dist/`。使用 `pnpm dev` 可在编辑时自动重建，重建完成后可在浏览器里重新加载扩展。
 
-测试覆盖按站点执行、匹配歧义、页面变化触发、点击冷却、规则移除和旧版全局规则停用。
+`src/extension/` 存放扩展后台、页面脚本、元素选取器和共享规则。`src/popup/` 和 `src/rules/` 对应弹窗和规则管理页，`src/build/` 存放构建与打包工具。测试单独放在根目录的 `tests/`，覆盖按站点执行、匹配歧义、页面变化触发、点击冷却和规则管理。
 
 ## 📦 自动构建与发布
 
@@ -95,8 +95,8 @@ pnpm run build
 
 将新版本推送到 `main` 后，测试和打包通过时会创建对应的 `v<版本>` 标签和 [GitHub Release](https://github.com/wrxx97/selector-clicker/releases)，并附上同一个 ZIP 和 [更新日志](CHANGELOG.md) 中对应版本的内容。其他分支和手动运行提供 Actions 构建产物。
 
-本地构建后，可使用 Python 3.10 或更新版本将 `dist/` 打成 ZIP。
+本地构建后，使用以下命令将 `dist/` 打成可分发的 ZIP。
 
 ```powershell
-python scripts/package-chrome.py selector-clicker-1.4.0.zip
+pnpm run package selector-clicker-1.4.1.zip
 ```

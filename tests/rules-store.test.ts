@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { compileRuntimeScript } from "../src/build/runtime-scripts";
 import { test } from "node:test";
 import { runInThisContext } from "node:vm";
 import type { StorageChanges, StoredValues } from "../src/lib/extension-types";
 
 test("rules store preserves unaffected groups and rows and consumes click updates without rereading storage", async () => {
-  runInThisContext(readFileSync(new URL("../site-rules.js", import.meta.url), "utf8"));
+  runInThisContext(compileRuntimeScript("site-rules.js"));
   type StorageListener = (changes: StorageChanges, area: string) => void;
   let storageListener: StorageListener | undefined;
   let reads = 0;
@@ -28,7 +28,7 @@ test("rules store preserves unaffected groups and rows and consumes click update
   };
   Object.defineProperty(globalThis, "chrome", { configurable: true, value: chromeMock });
   try {
-    const { useRulesStore, startRules } = await import("../src/lib/rules-store.ts");
+    const { useRulesStore, startRules } = await import("../src/rules/store.ts");
     const stop = startRules();
     try {
       const state = useRulesStore.getState;

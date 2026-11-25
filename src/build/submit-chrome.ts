@@ -9,13 +9,41 @@ const STORE_SCOPE = "https://www.googleapis.com/auth/chromewebstore";
 const UPLOAD_POLL_LIMIT = 30;
 const UPLOAD_POLL_DELAY = 3000;
 
-async function requestJson(request, url, options, label) {
+export interface StoreRequestOptions extends Omit<RequestInit, "body"> {
+  body?: string | URLSearchParams | Buffer;
+}
+
+type StoreRequest = (url: string, options: StoreRequestOptions) => Promise<Response>;
+
+interface StoreResponse {
+  error?: { message?: unknown };
+  error_description?: unknown;
+  access_token?: unknown;
+  submittedItemRevisionStatus?: { state?: string };
+  crxVersion?: string;
+  uploadState?: string;
+  lastAsyncUploadState?: string;
+  state?: string;
+}
+
+interface ReviewSubmission {
+  archive: Buffer;
+  version: string;
+  publisherId?: string;
+  itemId?: string;
+  accessToken: string;
+}
+
+const defaultRequest: StoreRequest = (url, { body, ...options }) =>
+  fetch(url, { ...options, body: Buffer.isBuffer(body) ? new Uint8Array(body) : body });
+
+async function requestJson(request: StoreRequest, url: string, options: StoreRequestOptions, label: string) {
   const response = await request(url, {
     ...options,
     redirect: "error",
     signal: AbortSignal.timeout(30000)
   });
-  const body = await response.json().catch(() => null);
+  const body = await response.json().catch(() => null) as StoreResponse | null;
   if (!response.ok) {
     const message = body?.error?.message || body?.error_description;
     const detail = typeof message === "string" ? ` — ${message.replace(/\s+/g, " ").slice(0, 600)}` : "";
@@ -25,19 +53,20 @@ async function requestJson(request, url, options, label) {
   return body;
 }
 
-export async function getAccessToken(serviceAccountJson, request = fetch) {
-  let account;
+export async function getAccessToken(serviceAccountJson: string | undefined, request: StoreRequest = defaultRequest) {
+  let account: { type?: unknown; client_email?: unknown; private_key?: unknown; private_key_id?: unknown } | null;
   try {
-    account = JSON.parse(serviceAccountJson);
+    account = JSON.parse(serviceAccountJson ?? "");
   } catch {
     throw new Error("Set CWS_SERVICE_ACCOUNT_JSON to the Google service account key JSON.");
   }
-  if (account?.type !== "service_account" || !account.client_email || !account.private_key) {
+  if (account?.type !== "service_account" || typeof account.client_email !== "string" || !account.client_email ||
+      typeof account.private_key !== "string" || !account.private_key) {
     throw new Error("CWS_SERVICE_ACCOUNT_JSON must contain a service account email and private key.");
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const header = { alg: "RS256", typ: "JWT", ...(account.private_key_id ? { kid: account.private_key_id } : {}) };
   const claims = { iss: account.client_email, scope: STORE_SCOPE, aud: TOKEN_URL, iat: now, exp: now + 3600 };
   const unsigned = `${encode(header)}.${encode(claims)}`;
@@ -53,7 +82,7 @@ export async function getAccessToken(serviceAccountJson, request = fetch) {
   return response.access_token;
 }
 
-function ensureNoPendingSubmission(status) {
+function ensureNoPendingSubmission(status: StoreResponse) {
   const state = status.submittedItemRevisionStatus?.state;
   if (state === "PENDING_REVIEW" || state === "STAGED") {
     throw new Error(`The store already has a ${state} revision. Resolve it in the Developer Dashboard before submitting another version.`);
@@ -61,10 +90,10 @@ function ensureNoPendingSubmission(status) {
 }
 
 export async function submitForReview(
-  { archive, version, publisherId, itemId, accessToken },
-  { request = fetch, delay = sleep } = {}
+  { archive, version, publisherId, itemId, accessToken }: ReviewSubmission,
+  { request = defaultRequest, delay = sleep }: { request?: StoreRequest; delay?: (milliseconds: number) => Promise<void> } = {}
 ) {
-  if (!publisherId || !/^[a-p]{32}$/.test(itemId || "")) {
+  if (!publisherId || !itemId || !/^[a-p]{32}$/.test(itemId)) {
     throw new Error("Set CWS_PUBLISHER_ID and the 32-character CWS_ITEM_ID from the Developer Dashboard.");
   }
   const resource = `v2/publishers/${encodeURIComponent(publisherId)}/items/${itemId}`;
@@ -102,8 +131,8 @@ export async function submitForReview(
 
 async function main() {
   const archivePath = process.argv[2];
-  if (!archivePath) throw new Error("Usage: node scripts/submit-chrome.mjs <extension.zip>");
-  const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+  if (!archivePath) throw new Error("Usage: node --import tsx src/build/submit-chrome.ts <extension.zip>");
+  const manifest: { version: string } = JSON.parse(await readFile(new URL("../../manifest.json", import.meta.url), "utf8"));
   const archive = await readFile(archivePath);
   const result = await submitForReview({
     archive,
@@ -118,7 +147,7 @@ async function main() {
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   main().catch((error) => {
-    console.error(error.message);
+    console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   });
 }

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
-import { getRuleSites, isRuleChange, isStatsKey, listenToStorage, readRules, readStats } from "./extension";
-import type { RuleSite, StoredValues } from "./extension-types";
+import { getRuleSites, isRuleChange, isStatsKey, listenToStorage, readRules, readStats } from "@/lib/extension";
+import type { RuleSite, StoredValues } from "@/lib/extension-types";
 
 interface RulesState {
   sites: RuleSite[] | null;

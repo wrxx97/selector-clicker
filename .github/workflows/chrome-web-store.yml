@@ -94,7 +94,7 @@ jobs:
         run: |
           archive="$RUNNER_TEMP/selector-clicker-$BUILD_VERSION.zip"
           pnpm run build
-          python3 scripts/package-chrome.py "$archive"
+          pnpm run package "$archive"
           python3 -m zipfile -t "$archive"
 
       - name: Save extension ZIP

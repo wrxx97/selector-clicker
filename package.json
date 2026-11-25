@@ -1,15 +1,17 @@
 {
   "name": "selector-clicker",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
+  "type": "module",
   "description": "Selector Clicker browser extension.",
   "packageManager": "pnpm@10.14.0",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "vite build",
+    "dev": "vite build --config src/build/vite.config.ts --watch",
+    "build": "vite build --config src/build/vite.config.ts",
+    "package": "node --import tsx src/build/package-chrome.ts",
     "test": "node --import tsx tests/run.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -31,6 +33,8 @@
     "@types/react": "^19.3.2",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
+    "fflate": "~0.8.3",
+    "parse5": "^8.1.1",
     "tailwindcss": "^4.3.5",
     "tsx": "^4.23.15",
     "typescript": "5.9.3",

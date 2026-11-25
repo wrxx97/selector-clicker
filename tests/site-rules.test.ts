@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { compileRuntimeScript, type RuntimeScript } from "../src/build/runtime-scripts";
 import crypto from "node:crypto";
 import test from "node:test";
 import vm from "node:vm";
@@ -30,8 +30,8 @@ function createWorker(now = Date.now) {
   let storageChanged!: StorageListener;
   let lastIcon: Record<number, string> | undefined;
   let context: vm.Context;
-  function loadScript(file: string) {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+  function loadScript(file: RuntimeScript) {
+    const source = compileRuntimeScript(file);
     vm.runInContext(source, context, { filename: file });
   }
   function storageArea(values: FixtureStorage) {

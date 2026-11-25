@@ -6,8 +6,8 @@ import { PopupHeader } from "./header";
 import { SiteCard } from "./site";
 import { PopupFooter } from "./footer";
 import { startPopup } from "./store";
-import "../theme.css";
-import "../popup.css";
+import "../styles/theme.css";
+import "./popup.css";
 
 function Popup() {
   useEffect(startTheme, []);

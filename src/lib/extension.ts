@@ -1,34 +1,10 @@
 import type {
-  ActiveSite, BackupSite, ImportSite, PageRequest, PageResponses, PauseOptions, Rule, RuleBackup,
-  RuleSite, StorageChanges, StoredValues, WorkerRequest, WorkerResponse
+  ActiveSite, PageRequest, PageResponses, PauseOptions, Rule,
+  StorageChanges, StoredValues, WorkerRequest, WorkerResponse
 } from "./extension-types";
 
 // These helpers load first as the same classic script used in the worker and on websites.
-const ruleData = globalThis as typeof globalThis & {
-  RULE_NAME_MAX_LENGTH: number;
-  TOTAL_CLICK_COUNT_KEY: string;
-  AUTHORIZED_SITES_KEY: string;
-  SITE_SELECTORS_PREFIX: string;
-  SITE_RULE_DETAILS_PREFIX: string;
-  SITE_PAUSED_PREFIX: string;
-  SITE_CLICK_COUNTS_PREFIX: string;
-  SITE_LAST_CLICK_TIMES_PREFIX: string;
-  SITE_SCRIPT_FILES: string[];
-  getSiteHostname(url?: string): string;
-  normalizeSiteHostname(value: string): string;
-  getSiteAccessPattern(url?: string): string;
-  siteSelectorsKey(hostname: string): string;
-  siteRuleDetailsKey(hostname: string): string;
-  sitePausedKey(hostname: string): string;
-  siteClickCountsKey(hostname: string): string;
-  siteLastClickTimesKey(hostname: string): string;
-  getExecutionOptions(pathPrefix?: string, maxClicks?: number): { pathPrefix: string; maxClicks: number } | null;
-  getSiteRules(stored: StoredValues, hostname: string): Rule[];
-  getRuleSites(stored: StoredValues): RuleSite[];
-  createRuleBackup(sites: RuleSite[]): RuleBackup;
-  parseRuleBackup(backup: unknown, validate?: (selector: string) => boolean): BackupSite[];
-  planRuleImport(stored: StoredValues, sites: BackupSite[]): ImportSite[];
-};
+const ruleData = globalThis;
 
 export const {
   RULE_NAME_MAX_LENGTH, TOTAL_CLICK_COUNT_KEY, AUTHORIZED_SITES_KEY, getExecutionOptions,

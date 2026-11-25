@@ -1,3 +1,5 @@
+declare function importScripts(...urls: string[]): void;
+
 importScripts("site-rules.js");
 
 const DEFAULTS = {
@@ -5,9 +7,9 @@ const DEFAULTS = {
   cooldown: 8000
 };
 
-let siteRuleUpdates = Promise.resolve();
+let siteRuleUpdates: Promise<unknown> = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
-let siteAccessUpdates = Promise.resolve();
+let siteAccessUpdates: Promise<unknown> = Promise.resolve();
 let toolbarIconUpdates = Promise.resolve();
 const SITE_SCRIPT_ID = "selector-clicker-sites";
 const toolbarThemes = new Set(["lavender", "rose", "amber", "night"]);
@@ -15,7 +17,7 @@ const toolbarThemes = new Set(["lavender", "rose", "amber", "night"]);
 function updateToolbarIcon() {
   const update = toolbarIconUpdates.then(async () => {
     const { uiTheme } = await chrome.storage.sync.get({ uiTheme: "sky" });
-    const suffix = toolbarThemes.has(uiTheme) ? uiTheme + "-" : "";
+    const suffix = typeof uiTheme === "string" && toolbarThemes.has(uiTheme) ? uiTheme + "-" : "";
     const path = Object.fromEntries([16, 24, 32].map((size) => [size, `icons/icon-${suffix}${size}.png`]));
     await chrome.action.setIcon({ path });
   });
@@ -23,9 +25,10 @@ function updateToolbarIcon() {
   return update;
 }
 
-function updateSiteAccess(granted = []) {
+function updateSiteAccess(granted: string[] = []) {
   const update = siteAccessUpdates.then(async () => {
-    const { [AUTHORIZED_SITES_KEY]: previous } = await chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] });
+    const { [AUTHORIZED_SITES_KEY]: stored } = await chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] });
+    const previous = storageStrings(stored);
     const exactOrigins = [...new Set([...previous, ...granted])].filter((pattern) =>
       pattern && pattern === getSiteAccessPattern(pattern));
     const checks = await Promise.all(exactOrigins.map((pattern) => chrome.permissions.contains({ origins: [pattern] })));
@@ -41,8 +44,8 @@ function updateSiteAccess(granted = []) {
       await chrome.scripting.registerContentScripts([{
         id: SITE_SCRIPT_ID, matches, js: SITE_SCRIPT_FILES, runAt: "document_idle", persistAcrossSessions: true
       }]);
-    } else if (JSON.stringify([...current.matches].sort()) !== JSON.stringify(matches)) {
-      await chrome.scripting.updateContentScripts([{ id: SITE_SCRIPT_ID, matches }]);
+    } else if (JSON.stringify([...(current.matches ?? [])].sort()) !== JSON.stringify(matches)) {
+      await chrome.scripting.updateContentScripts([{ id: SITE_SCRIPT_ID, matches, js: SITE_SCRIPT_FILES }]);
     }
     return matches;
   });
@@ -50,7 +53,7 @@ function updateSiteAccess(granted = []) {
   return update;
 }
 
-function withRulePause(details, selectors, paused) {
+function withRulePause(details: RuntimeRuleDetails, selectors: string[], paused: boolean) {
   let updated = details;
   for (const selector of selectors) {
     if (typeof selector !== "string" || !selector.trim()) continue;
@@ -63,17 +66,28 @@ function withRulePause(details, selectors, paused) {
   return updated;
 }
 
-function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused, execution }) {
+type SelectorUpdate =
+  | { type: "save-site-selector"; selector: string; name?: string }
+  | { type: "remove-site-selector"; selector: string }
+  | { type: "edit-site-selector"; selector: string; replacement: string; name?: string; expectedId?: string; execution?: RuntimeExecution }
+  | { type: "set-rule-paused"; selector: string; expectedId: string; paused: boolean }
+  | { type: "set-site-paused"; paused: boolean };
+
+function updateSiteSelectors(hostname: string, request: SelectorUpdate) {
+  const { type } = request;
+  const selector = "selector" in request ? request.selector : "";
   const key = siteSelectorsKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
   const pausedKey = sitePausedKey(hostname);
   const update = siteRuleUpdates.then(async () => {
-    const { [key]: current, [detailsKey]: currentDetails, [pausedKey]: legacyPaused } = await chrome.storage.sync.get({
+    const stored = await chrome.storage.sync.get({
       [key]: [],
       [detailsKey]: {},
       [pausedKey]: false
     });
-    const hadLegacyPause = legacyPaused === true;
+    const current = storageStrings(stored[key]);
+    const currentDetails = ruleDetails(stored[detailsKey]);
+    const hadLegacyPause = stored[pausedKey] === true;
     let details = hadLegacyPause ? withRulePause(currentDetails, current, true) : currentDetails;
     const index = current.indexOf(selector);
     const selectorKey = ruleSelectorKey(selector);
@@ -81,7 +95,8 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
     let next = current;
 
     switch (type) {
-      case "save-site-selector":
+      case "save-site-selector": {
+        const { name } = request;
         if (index === -1) {
           next = [...current, selector];
           details = { ...details, [selectorKey]: { id: crypto.randomUUID(), name: name || "" } };
@@ -89,6 +104,7 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
           details = { ...details, [selectorKey]: { ...existing, id: existing?.id || selectorKey, name } };
         }
         break;
+      }
       case "remove-site-selector":
         if (index !== -1) {
           next = current.filter((rule) => rule !== selector);
@@ -98,7 +114,8 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
           }
         }
         break;
-      case "edit-site-selector":
+      case "edit-site-selector": {
+        const { replacement, name, expectedId, execution } = request;
         if (index === -1 || (expectedId && expectedId !== (existing?.id || selectorKey))) {
           return { ok: false, reason: "missing" };
         }
@@ -118,14 +135,17 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
           ...execution
         };
         break;
-      case "set-rule-paused":
+      }
+      case "set-rule-paused": {
+        const { expectedId, paused } = request;
         if (index === -1 || expectedId !== (existing?.id || selectorKey)) {
           return { ok: false, reason: "missing" };
         }
         details = withRulePause(details, [selector], paused);
         break;
+      }
       case "set-site-paused":
-        details = withRulePause(details, current, paused);
+        details = withRulePause(details, current, request.paused);
         break;
     }
 
@@ -133,7 +153,7 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
       if (!next.length) {
         await chrome.storage.sync.remove([key, detailsKey, pausedKey]);
       } else {
-        const changes = {};
+        const changes: RuntimeStored = {};
         if (next !== current) changes[key] = next;
         if (details !== currentDetails) changes[detailsKey] = details;
         // Write both keys together so readers never see the legacy pause lifted before its rules are saved.
@@ -147,7 +167,7 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
   return update;
 }
 
-function recordClickStats(hostname, ruleIds) {
+function recordClickStats(hostname: string, ruleIds: string[]) {
   const countsKey = siteClickCountsKey(hostname);
   const timesKey = siteLastClickTimesKey(hostname);
   const clickedAt = Date.now();
@@ -157,24 +177,26 @@ function recordClickStats(hostname, ruleIds) {
       [timesKey]: {},
       [TOTAL_CLICK_COUNT_KEY]: 0
     });
-    const counts = { ...currentCounts };
-    const times = { ...currentTimes };
+    const counts = { ...recordValues(currentCounts) };
+    const times = { ...recordValues(currentTimes) };
     for (const id of ruleIds) {
       const key = `rule:${id}`;
-      counts[key] = (counts[key] || 0) + 1;
-      times[key] = Math.max(times[key] || 0, clickedAt);
+      const count = counts[key];
+      const time = times[key];
+      counts[key] = (typeof count === "number" ? count : 0) + 1;
+      times[key] = Math.max(typeof time === "number" ? time : 0, clickedAt);
     }
     await chrome.storage.local.set({
       [countsKey]: counts,
       [timesKey]: times,
-      [TOTAL_CLICK_COUNT_KEY]: total + ruleIds.length
+      [TOTAL_CLICK_COUNT_KEY]: (typeof total === "number" ? total : 0) + ruleIds.length
     });
   });
   clickStatsUpdates = update.catch(() => {});
   return update;
 }
 
-function copySiteStats(hostname, destination, rules) {
+function copySiteStats(hostname: string, destination: string, rules: RuntimeRule[]) {
   const update = clickStatsUpdates.then(async () => {
     const sourceCounts = siteClickCountsKey(hostname);
     const sourceTimes = siteLastClickTimesKey(hostname);
@@ -183,12 +205,13 @@ function copySiteStats(hostname, destination, rules) {
     const stored = await chrome.storage.local.get({
       [sourceCounts]: {}, [sourceTimes]: {}, [targetCounts]: {}, [targetTimes]: {}
     });
-    const changes = {};
+    const changes: RuntimeStored = {};
     for (const [from, to] of [[sourceCounts, targetCounts], [sourceTimes, targetTimes]]) {
-      const updated = { ...stored[to] };
+      const source = recordValues(stored[from]);
+      const updated = { ...recordValues(stored[to]) };
       for (const { id } of rules) {
         const key = `rule:${id}`;
-        const value = stored[from][key];
+        const value = source[key];
         if (updated[key] === value) continue;
         if (value === undefined) delete updated[key];
         else updated[key] = value;
@@ -201,7 +224,12 @@ function copySiteStats(hostname, destination, rules) {
   return update;
 }
 
-function updateSiteGroup({ hostname, destination, expectedRuleIds, type }) {
+function updateSiteGroup({ hostname, destination, expectedRuleIds, type }: {
+  hostname: string;
+  destination?: unknown;
+  expectedRuleIds: string[];
+  type: "rename-site" | "remove-site-rules";
+}) {
   const selectors = siteSelectorsKey(hostname);
   const details = siteRuleDetailsKey(hostname);
   const paused = sitePausedKey(hostname);
@@ -237,17 +265,17 @@ function updateSiteGroup({ hostname, destination, expectedRuleIds, type }) {
   return update;
 }
 
-function importRules(backup) {
+function importRules(backup: unknown) {
   const update = siteRuleUpdates.then(async () => {
     const sites = parseRuleBackup(backup);
-    const defaults = {};
+    const defaults: RuntimeStored = {};
     for (const { hostname } of sites) {
       defaults[siteSelectorsKey(hostname)] = [];
       defaults[siteRuleDetailsKey(hostname)] = {};
       defaults[sitePausedKey(hostname)] = false;
     }
     const stored = await chrome.storage.sync.get(defaults);
-    const changes = {};
+    const changes: RuntimeStored = {};
     let addedCount = 0;
     let duplicateCount = 0;
     for (const { hostname, existing, added, duplicates } of planRuleImport(stored, sites)) {
@@ -258,13 +286,14 @@ function importRules(backup) {
       const detailsKey = siteRuleDetailsKey(hostname);
       const pausedKey = sitePausedKey(hostname);
       const existingSelectors = existing.map((rule) => rule.selector);
-      const existingDetails = stored[pausedKey] === true
-        ? withRulePause(stored[detailsKey], existingSelectors, true) : stored[detailsKey];
+      const existingDetails = ruleDetails(stored[detailsKey]);
+      const updatedDetails = stored[pausedKey] === true
+        ? { ...withRulePause(existingDetails, existingSelectors, true) } : { ...existingDetails };
       changes[selectorsKey] = [...existingSelectors, ...added.map((rule) => rule.selector)];
-      changes[detailsKey] = { ...existingDetails };
+      changes[detailsKey] = updatedDetails;
       if (stored[pausedKey] === true) changes[pausedKey] = false;
       for (const { selector, ...details } of added) {
-        changes[detailsKey][ruleSelectorKey(selector)] = { ...details, id: crypto.randomUUID() };
+        updatedDetails[ruleSelectorKey(selector)] = { ...details, id: crypto.randomUUID() };
       }
     }
     if (addedCount) await chrome.storage.sync.set(changes);
@@ -287,7 +316,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.permissions.onAdded.addListener(({ origins }) => updateSiteAccess(origins).catch(() => {}));
 chrome.permissions.onRemoved.addListener(() => updateSiteAccess().catch(() => {}));
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) => {
+  const message = recordValues(payload);
   if (message.type === "authorize-site") {
     if (sender.url !== chrome.runtime.getURL("popup.html")) return;
     const { pattern } = message;
@@ -309,7 +339,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false });
       return;
     }
-    updateSiteGroup(message).then(sendResponse, () => sendResponse({ ok: false }));
+    updateSiteGroup({ type: message.type, hostname, destination: message.destination, expectedRuleIds }).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   if (message.type === "import-rules") {
@@ -344,10 +374,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type: messageType, selector, expectedId } = message;
   const isPickedReplacement = messageType === "replace-picked-selector";
   const type = isPickedReplacement ? "edit-site-selector" : messageType;
-  if (!["save-site-selector", "remove-site-selector", "edit-site-selector", "set-rule-paused", "set-site-paused"].includes(type)) return;
+  if (type !== "save-site-selector" && type !== "remove-site-selector" && type !== "edit-site-selector" &&
+      type !== "set-rule-paused" && type !== "set-site-paused") return;
 
   const hostname = type === "save-site-selector" || isPickedReplacement ? getSiteHostname(sender.url) : message.hostname;
-  if (!hostname || getSiteHostname(`https://${hostname}`) !== hostname) {
+  if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname) {
     sendResponse({ ok: false });
     return;
   }
@@ -366,12 +397,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const execution = hasExecution ? getExecutionOptions(message.pathPrefix, message.maxClicks) : undefined;
   if (typeof selector !== "string" || !selector.trim() || (type === "edit-site-selector" && !replacement.trim()) ||
       (hasExecution && !execution) ||
-      (isPickedReplacement && (typeof expectedId !== "string" || !expectedId)) ||
-      (type === "set-rule-paused" && (typeof paused !== "boolean" || typeof expectedId !== "string" || !expectedId))) {
+      (isPickedReplacement && (typeof expectedId !== "string" || !expectedId))) {
     sendResponse({ ok: false });
     return;
   }
-  updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused, execution }).then(
+  let request: SelectorUpdate;
+  switch (type) {
+    case "set-rule-paused":
+      if (typeof paused !== "boolean" || typeof expectedId !== "string" || !expectedId) {
+        sendResponse({ ok: false });
+        return;
+      }
+      request = { type, selector, expectedId, paused };
+      break;
+    case "edit-site-selector":
+      request = { type, selector, replacement, name, expectedId: typeof expectedId === "string" ? expectedId : undefined, execution: execution ?? undefined };
+      break;
+    case "save-site-selector":
+      request = { type, selector, name };
+      break;
+    case "remove-site-selector":
+      request = { type, selector };
+      break;
+  }
+  updateSiteSelectors(hostname, request).then(
     sendResponse,
     () => sendResponse({ ok: false })
   );

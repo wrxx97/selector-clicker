@@ -24,5 +24,5 @@ test("declares the extension popup and service worker", () => {
 test("declares the rules manager as an options page that opens in a tab", () => {
   assert.deepEqual(manifest.options_ui, { page: "rules.html", open_in_tab: true });
   assert.ok(manifest.options_ui);
-  assert.ok(existsSync(new URL(`../${manifest.options_ui.page}`, import.meta.url)));
+  assert.ok(existsSync(new URL(`../src/${manifest.options_ui.page}`, import.meta.url)));
 });
