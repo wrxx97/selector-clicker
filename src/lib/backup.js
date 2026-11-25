@@ -1,4 +1,4 @@
-import { createRuleBackup, getRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension.js";
+import { createRuleBackup, getRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension";
 
 export const MAX_BACKUP_BYTES = 1024 * 1024;
 

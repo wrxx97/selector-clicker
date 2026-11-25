@@ -32,10 +32,10 @@ class PageAssets(HTMLParser):
 def extension_files():
     built_manifest = DIST / "manifest.json"
     if not built_manifest.is_file():
-        raise ValueError("The extension build is missing. Run npm run build first.")
+        raise ValueError("The extension build is missing. Run pnpm run build first.")
     manifest = loads(built_manifest.read_text(encoding="utf-8"))
     if manifest != loads((EXTENSION_ROOT / "manifest.json").read_text(encoding="utf-8")):
-        raise ValueError("The extension build is out of date. Run npm run build again.")
+        raise ValueError("The extension build is out of date. Run pnpm run build again.")
 
     action = manifest["action"]
     pages = (action["default_popup"], manifest["options_ui"]["page"])

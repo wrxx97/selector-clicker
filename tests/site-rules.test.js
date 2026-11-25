@@ -186,23 +186,62 @@ test("re-picking is scoped to the sender site and refuses to replace a recreated
   assert.deepEqual(await worker.send(request, sender), { ok: false, reason: "missing" });
 });
 
-test("preserves a paused rule through an edit and isolates the site pause", async () => {
+test("batch pause updates each rule and allows individual and batch resume", async () => {
   const worker = createWorker();
   const hostname = "example.com";
-  const selector = "#close";
   const sender = { url: `https://${hostname}/` };
-  await worker.send({ type: "save-site-selector", selector, name: "Close" }, sender);
   const detailsKey = "siteRuleDetails:example.com";
+  const save = (selector, name, source = sender) => worker.send({ type: "save-site-selector", selector, name }, source);
+  const pauseAll = (paused) => worker.send({ type: "set-site-paused", hostname, paused });
+  const rules = () => worker.backup().sites.find((site) => site.hostname === hostname).rules;
+  const states = () => rules().map((rule) => rule.paused);
+
+  await save("#close", "Close");
+  await save("#dismiss", "Dismiss");
+  await save("#close", "Other", { url: "https://other.example/" });
   const { id } = worker.store.get(detailsKey)["selector:#close"];
-  await worker.send({ type: "set-rule-paused", hostname, selector, expectedId: id, paused: true });
-  await worker.send({ type: "set-site-paused", hostname, paused: true });
-  await worker.send({ type: "edit-site-selector", hostname, selector, replacement: "#other" });
-  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), { id, name: "Close", paused: true });
-  assert.equal(worker.store.get("sitePaused:example.com"), true);
-  assert.equal(worker.store.has("sitePaused:other.example"), false);
-  await worker.send({ type: "set-site-paused", hostname, paused: false });
+  const pauseRule = (paused) => worker.send({
+    type: "set-rule-paused", hostname, selector: "#close", expectedId: id, paused
+  });
+
+  await pauseRule(true);
+  assert.deepEqual(states(), [true, false]);
+  await pauseAll(true);
+  assert.deepEqual(states(), [true, true]);
+  assert.equal(worker.backup().sites[0].paused, true);
   assert.equal(worker.store.has("sitePaused:example.com"), false);
-  assert.equal(worker.store.get(detailsKey)["selector:#other"].paused, true);
+  assert.equal(worker.backup().sites[1].rules[0].paused, false);
+  await Promise.all([pauseAll(true), pauseRule(false)]);
+  assert.deepEqual(states(), [false, true]);
+  assert.equal(worker.backup().sites[0].paused, false);
+  await pauseAll(true);
+  await worker.send({ type: "edit-site-selector", hostname, selector: "#close", replacement: "#other" });
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), { id, name: "Close", paused: true });
+  await save("#new", "New");
+  assert.deepEqual(states(), [true, true, false]);
+  await pauseAll(false);
+  assert.deepEqual(states(), [false, false, false]);
+});
+
+test("converts a legacy site pause without losing IDs, execution conditions, or other rules' pause state", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const detailsKey = "siteRuleDetails:example.com";
+  worker.store.set("siteSelectors:example.com", ["#old", "#other"]);
+  worker.store.set("sitePaused:example.com", true);
+  worker.store.set(detailsKey, { "selector:#other": { id: "other", name: "Other", maxClicks: 3 } });
+  assert.deepEqual(worker.backup().sites[0].rules.map((rule) => rule.paused), [true, true]);
+
+  const result = await worker.send({
+    type: "set-rule-paused", hostname, selector: "#old", expectedId: "selector:#old", paused: false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(worker.store.get("sitePaused:example.com"), false);
+  assert.deepEqual(worker.backup().sites[0].rules.map((rule) => rule.paused), [false, true]);
+  assert.deepEqual(structuredClone(worker.store.get(detailsKey)["selector:#other"]), {
+    id: "other", name: "Other", maxClicks: 3, paused: true
+  });
 });
 
 test("validates execution options and retains them when a target is re-picked", async () => {
@@ -230,7 +269,7 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   await worker.send({ type: "save-site-selector", selector: "#first", name: "Keep" }, { url: `https://${hostname}/` });
   const detailsKey = "siteRuleDetails:example.com";
   const first = structuredClone(worker.store.get(detailsKey)["selector:#first"]);
-  const second = { selector: "#second", name: "Second", paused: true, pathPrefix: "/tasks", maxClicks: 1 };
+  const second = { selector: "#second", name: "Second", paused: false, pathPrefix: "/tasks", maxClicks: 1 };
   const backup = { format: "selector-clicker-rules", version: 1, sites: [
     { hostname, paused: true, rules: [{ selector: "#first", name: "Changed" }, second, second] }
   ] };
@@ -242,7 +281,7 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   const { id, ...actual } = worker.store.get(detailsKey)["selector:#second"];
   const { selector, ...expected } = second;
   assert.ok(id && id !== first.id);
-  assert.deepEqual(actual, expected);
+  assert.deepEqual(actual, { ...expected, paused: true });
   const add = { hostname: "other.example", rules: [{ selector: "#okay" }] };
   const invalid = { hostname: "invalid.example", rules: [{ selector: "#bad", maxClicks: -1 }] };
   const broken = { ...backup, sites: [add, invalid] };

@@ -50,7 +50,8 @@ async function startContentScript({
   invalidSelectors = [],
   url = "https://example.com/",
   authorized = true,
-  reinject = false
+  reinject = false,
+  now = Date.now
 }) {
   const runtimeListeners = [];
   const storageListeners = [];
@@ -70,7 +71,7 @@ async function startContentScript({
   };
 
   const sandbox = {
-    Date,
+    Date: { now },
     URL,
     location: { href: url },
     document,
@@ -323,7 +324,8 @@ test("applies a new site rule and disconnects after the last rule is removed", a
   assert.equal(app.observer.options, undefined);
 });
 
-test("respects the cooldown when an immediate scan is requested twice", async () => {
+test("respects the cooldown and applies changes to an open page", async () => {
+  let time = 0;
   const closeButton = createElement();
   const app = await startContentScript({
     config: {
@@ -331,13 +333,19 @@ test("respects the cooldown when an immediate scan is requested twice", async ()
       [siteKey]: [".ad-close"],
       cooldown: 8000
     },
-    elementsBySelector: { ".ad-close": [closeButton] }
+    elementsBySelector: { ".ad-close": [closeButton] },
+    now: () => time
   });
 
+  time = 2000;
   const response = sendMessage(app.runtimeListeners[0], { type: "scan-now" });
 
   assert.equal(closeButton.state.clicks, 1);
   assert.deepEqual(toPlainObject(response), { totalClicks: 1 });
+
+  app.storageListeners[0]({ cooldown: { newValue: 2000 } }, "sync");
+  assert.equal(closeButton.state.clicks, 2);
+  assert.equal(sendMessage(app.runtimeListeners[0], { type: "scan-now" }).totalClicks, 2);
 });
 
 test("tests saved rules without clicking or recording statistics", async () => {
@@ -397,7 +405,7 @@ test("stops clicking after the extension is disabled through storage", async () 
   assert.deepEqual(toPlainObject(app.messages.at(-1)), { type: "reset-badge" });
 });
 
-test("pauses one rule independently and disconnects scans while the site is paused", async () => {
+test("disconnects scanning when all rules are paused and resumes a single rule immediately", async () => {
   const pausedButton = createElement();
   const activeButton = createElement();
   const detailsKey = "siteRuleDetails:example.com";
@@ -412,13 +420,38 @@ test("pauses one rule independently and disconnects scans while the site is paus
   assert.equal(pausedButton.state.clicks, 0);
   assert.equal(activeButton.state.clicks, 1);
   const update = (changes) => app.storageListeners[0](changes, "sync");
-  update({ "sitePaused:example.com": { newValue: true } });
-  update({ [detailsKey]: { newValue: {} } });
+  update({ [detailsKey]: { newValue: { "selector:#one": { paused: true }, "selector:#two": { paused: true } } } });
   assert.equal(app.observer.options, undefined);
   sendMessage(app.runtimeListeners[0], { type: "scan-now" });
   assert.equal(pausedButton.state.clicks, 0);
-  update({ "sitePaused:example.com": { newValue: false } });
+  const testRule = (selector) => sendMessage(app.runtimeListeners[0], {
+    type: "test-rule", hostname: "example.com", selector
+  });
+  assert.equal(testRule("#two").status, "rule-paused");
+  update({ [detailsKey]: { newValue: { "selector:#two": { paused: true } } } });
   assert.equal(pausedButton.state.clicks, 1);
+  assert.equal(activeButton.state.clicks, 1);
+  assert.ok(app.observer.options);
+});
+
+test("honors a legacy site pause until the rule details are migrated", async () => {
+  const first = createElement();
+  const second = createElement();
+  const pausedKey = "sitePaused:example.com";
+  const detailsKey = "siteRuleDetails:example.com";
+  const app = await startContentScript({
+    config: { enabled: true, [siteKey]: ["#one", "#two"], [pausedKey]: true },
+    elementsBySelector: { "#one": [first], "#two": [second] }
+  });
+  assert.equal(app.observer.options, undefined);
+  assert.equal(first.state.clicks, 0);
+  assert.equal(second.state.clicks, 0);
+  app.storageListeners[0]({
+    [detailsKey]: { newValue: { "selector:#two": { paused: true } } },
+    [pausedKey]: { newValue: false }
+  }, "sync");
+  assert.equal(first.state.clicks, 1);
+  assert.equal(second.state.clicks, 0);
 });
 
 test("enforces a segment-safe path prefix and a page limit when the target is replaced", async () => {

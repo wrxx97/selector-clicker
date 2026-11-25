@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getRuleSites, readRules, readStats } from "./extension.js";
+import { getRuleSites, readRules, readStats } from "./extension";
 
 let rulesRequest = 0;
 let statsRequest = 0;

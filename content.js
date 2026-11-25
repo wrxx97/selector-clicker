@@ -83,7 +83,6 @@
   }
 
   function ruleRestriction(rule) {
-    if (config[pausedKey]) return "site-paused";
     if (rule.paused) return "rule-paused";
     if (rule.pathPrefix) {
       const path = new URL(location.href).pathname;
@@ -94,7 +93,7 @@
   }
 
   function automaticClickEnabled() {
-    return siteAuthorized && config.enabled && !config[pausedKey] && siteRules.some((rule) => !rule.paused);
+    return siteAuthorized && config.enabled && siteRules.some((rule) => !rule.paused);
   }
 
   function scan() {
@@ -139,7 +138,7 @@
       if (scanImmediately) scan();
     } else {
       observer.disconnect();
-      if (!config.enabled || !siteAuthorized || config[pausedKey]) chrome.runtime.sendMessage({ type: "reset-badge" });
+      if (!config.enabled || !siteAuthorized || siteRules.length) chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 

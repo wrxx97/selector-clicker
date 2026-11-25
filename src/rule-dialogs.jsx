@@ -3,17 +3,26 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Toast, useToast } from "@/components/ui/toast";
 import { previewRuleImport, validateSelector } from "@/lib/backup";
 import { RULE_NAME_MAX_LENGTH, getExecutionOptions, send } from "@/lib/extension";
 
-const dialogClass = "max-h-[calc(100dvh-2rem)] overflow-auto p-5 sm:max-w-lg";
+function RuleDialogContent({ children, feedback, dismiss, ...props }) {
+  return <DialogContent {...props} className="gap-0 p-0 sm:max-w-lg" showCloseButton={false}>
+    <div className="grid max-h-[calc(100dvh-2rem)] gap-4 overflow-auto p-5">
+      {children}
+    </div>
+    <Toast feedback={feedback} dismiss={dismiss} className="absolute inset-x-3.5 bottom-3.5 z-10 mx-auto" />
+  </DialogContent>;
+}
 
 export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
   const { hostname, rule, remove } = action;
   const [draft, setDraft] = useState({
     name: rule.name, selector: rule.selector, path: rule.pathPrefix, limit: rule.maxClicks || ""
   });
-  const [error, setError] = useState("");
+  const { feedback, setFeedback, dismiss } = useToast();
+  const reportError = (text) => setFeedback({ text, error: true });
   const [saving, setSaving] = useState(false);
   const nameInput = useRef(null);
   const cancelButton = useRef(null);
@@ -22,15 +31,15 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
   async function submit(event) {
     event.preventDefault();
     if (saving) return;
-    const execution = getExecutionOptions(draft.path, Number(draft.limit));
+    const execution = event.currentTarget.checkValidity() ? getExecutionOptions(draft.path, Number(draft.limit)) : null;
     const invalid = !remove && (validateSelector(draft.selector) || (!execution &&
       "请输入以 / 开头的路径（不含查询参数）和非负整数点击次数。"));
     if (invalid) {
-      setError(invalid);
+      reportError(invalid);
       return;
     }
     setSaving(true);
-    setError("");
+    setFeedback(null);
     const failure = remove ? "移除规则失败，请重试。" : "保存修改失败，请重试。";
     try {
       const message = {
@@ -41,19 +50,19 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
       const result = await send(message);
       if (!result?.ok) {
         const errors = { duplicate: "此网站已有相同的选择器。", missing: "这条规则已变更，请返回列表重新选择。" };
-        setError(errors[result?.reason] || failure);
+        reportError(errors[result?.reason] || failure);
         return;
       }
       onSaved(remove ? "已移除规则。" : "已保存修改。");
     } catch {
-      setError(failure);
+      reportError(failure);
     } finally {
       setSaving(false);
     }
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
-    <DialogContent className={dialogClass} showCloseButton={false}
+    <RuleDialogContent feedback={feedback} dismiss={dismiss}
       onOpenAutoFocus={(event) => {
         event.preventDefault();
         (remove ? cancelButton : nameInput).current?.focus();
@@ -62,7 +71,7 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
         <DialogTitle>{remove ? "移除这条规则？" : "编辑规则"}</DialogTitle>
         <DialogDescription>{hostname}{remove && rule.name ? ` · ${rule.name}` : ""}</DialogDescription>
       </DialogHeader>
-      <form id="rule-form" className="grid gap-3" onSubmit={submit}>
+      <form id="rule-form" className="grid gap-3" onSubmit={submit} noValidate>
         {remove ? <code className="break-all rounded-lg bg-muted p-3 text-xs">{rule.selector}</code> : <>
           <label className="grid gap-1.5">
             备注名称（选填）
@@ -85,7 +94,6 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
               readOnly={saving} placeholder="0 表示不限次数" />
           </label>
         </>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
           <Button ref={cancelButton} type="button" variant="outline" disabled={saving} onClick={onClose}>取消</Button>
           <Button type="submit" variant={remove ? "destructive" : "default"} disabled={saving}>
@@ -93,7 +101,7 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
           </Button>
         </div>
       </form>
-    </DialogContent>
+    </RuleDialogContent>
   </Dialog>;
 }
 
@@ -101,7 +109,8 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState(source.preview);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { feedback, setFeedback, dismiss } = useToast();
+  const reportError = (text) => setFeedback({ text, error: true });
   const input = useRef(null);
   const primary = useRef(null);
   const cancel = useRef(null);
@@ -116,7 +125,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
     event.preventDefault();
     if (busy || (preview && !preview.added)) return;
     setBusy(true);
-    setError("");
+    setFeedback(null);
     try {
       if (!preview) {
         setPreview(await previewRuleImport(draft));
@@ -126,14 +135,14 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
       if (!result?.ok) throw new Error("Could not import rules");
       onSaved(`已导入 ${result.addedCount} 条规则，跳过 ${result.duplicateCount} 条重复规则。`);
     } catch (failure) {
-      setError(preview ? "导入失败，请检查浏览器同步存储空间后重试。" : failure.message);
+      reportError(preview ? "导入失败，请检查浏览器同步存储空间后重试。" : failure.message);
     } finally {
       setBusy(false);
     }
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogContent className={dialogClass} showCloseButton={false} onCloseAutoFocus={returnFocus}
+    <RuleDialogContent feedback={feedback} dismiss={dismiss} onCloseAutoFocus={returnFocus}
       onOpenAutoFocus={(event) => { event.preventDefault(); focusCurrent(); }}>
       <DialogHeader>
         <DialogTitle>{preview ? "预览导入规则" : "粘贴 JSON 导入"}</DialogTitle>
@@ -153,16 +162,15 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
           <Textarea ref={input} id="backup-text" value={draft} onChange={(event) => setDraft(event.target.value)}
             className="min-h-40 resize-y font-mono text-xs" spellCheck={false} readOnly={busy} />
         </label>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
           {preview && source.type === "text" && <Button type="button" variant="ghost"
-            disabled={busy} onClick={() => { setPreview(null); setError(""); }}>返回修改</Button>}
+            disabled={busy} onClick={() => { setPreview(null); setFeedback(null); }}>返回修改</Button>}
           <Button ref={cancel} type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button>
           <Button ref={primary} id="confirm-import" type="submit" disabled={busy || (preview && !preview.added)}>
             {preview ? "导入新增规则" : "预览导入"}
           </Button>
         </div>
       </form>
-    </DialogContent>
+    </RuleDialogContent>
   </Dialog>;
 }

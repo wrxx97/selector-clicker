@@ -37,34 +37,50 @@ function updateSiteAccess(granted = []) {
   return update;
 }
 
+function withRulePause(details, selectors, paused) {
+  let updated = details;
+  for (const selector of selectors) {
+    if (typeof selector !== "string" || !selector.trim()) continue;
+    const key = ruleSelectorKey(selector);
+    const existing = details[key];
+    if (paused === (existing?.paused === true)) continue;
+    if (updated === details) updated = { ...details };
+    updated[key] = { ...existing, id: existing?.id || key, name: existing?.name || "", paused };
+  }
+  return updated;
+}
+
 function updateSiteSelectors(hostname, { type, selector, replacement, name, expectedId, paused, execution }) {
   const key = siteSelectorsKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
+  const pausedKey = sitePausedKey(hostname);
   const update = siteRuleUpdates.then(async () => {
-    const { [key]: current, [detailsKey]: currentDetails } = await chrome.storage.sync.get({
+    const { [key]: current, [detailsKey]: currentDetails, [pausedKey]: legacyPaused } = await chrome.storage.sync.get({
       [key]: [],
-      [detailsKey]: {}
+      [detailsKey]: {},
+      [pausedKey]: false
     });
+    const hadLegacyPause = legacyPaused === true;
+    let details = hadLegacyPause ? withRulePause(currentDetails, current, true) : currentDetails;
     const index = current.indexOf(selector);
     const selectorKey = ruleSelectorKey(selector);
-    const existing = currentDetails[selectorKey];
+    const existing = details[selectorKey];
     let next = current;
-    let details = currentDetails;
 
     switch (type) {
       case "save-site-selector":
         if (index === -1) {
           next = [...current, selector];
-          details = { ...currentDetails, [selectorKey]: { id: crypto.randomUUID(), name: name || "" } };
+          details = { ...details, [selectorKey]: { id: crypto.randomUUID(), name: name || "" } };
         } else if (name && name !== existing?.name) {
-          details = { ...currentDetails, [selectorKey]: { ...existing, id: existing?.id || selectorKey, name } };
+          details = { ...details, [selectorKey]: { ...existing, id: existing?.id || selectorKey, name } };
         }
         break;
       case "remove-site-selector":
         if (index !== -1) {
           next = current.filter((rule) => rule !== selector);
           if (existing) {
-            details = { ...currentDetails };
+            details = { ...details };
             delete details[selectorKey];
           }
         }
@@ -80,7 +96,7 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
         } else if (!execution && (name == null || name === (existing?.name || ""))) {
           break;
         }
-        details = { ...currentDetails };
+        details = { ...details };
         delete details[selectorKey];
         details[ruleSelectorKey(replacement)] = {
           ...existing,
@@ -93,21 +109,22 @@ function updateSiteSelectors(hostname, { type, selector, replacement, name, expe
         if (index === -1 || expectedId !== (existing?.id || selectorKey)) {
           return { ok: false, reason: "missing" };
         }
-        if (paused === (existing?.paused === true)) break;
-        details = {
-          ...currentDetails,
-          [selectorKey]: { ...existing, id: expectedId, name: existing?.name || "", paused }
-        };
+        details = withRulePause(details, [selector], paused);
+        break;
+      case "set-site-paused":
+        details = withRulePause(details, current, paused);
         break;
     }
 
-    if (next !== current || details !== currentDetails) {
+    if (next !== current || details !== currentDetails || hadLegacyPause) {
       if (!next.length) {
-        await chrome.storage.sync.remove([key, detailsKey]);
+        await chrome.storage.sync.remove([key, detailsKey, pausedKey]);
       } else {
         const changes = {};
         if (next !== current) changes[key] = next;
         if (details !== currentDetails) changes[detailsKey] = details;
+        // Write both keys together so readers never see the legacy pause lifted before its rules are saved.
+        if (hadLegacyPause) changes[pausedKey] = false;
         await chrome.storage.sync.set(changes);
       }
     }
@@ -151,23 +168,28 @@ function importRules(backup) {
     for (const { hostname } of sites) {
       defaults[siteSelectorsKey(hostname)] = [];
       defaults[siteRuleDetailsKey(hostname)] = {};
+      defaults[sitePausedKey(hostname)] = false;
     }
     const stored = await chrome.storage.sync.get(defaults);
     const changes = {};
     let addedCount = 0;
     let duplicateCount = 0;
-    for (const { hostname, paused, existing, added, duplicates } of planRuleImport(stored, sites)) {
+    for (const { hostname, existing, added, duplicates } of planRuleImport(stored, sites)) {
       addedCount += added.length;
       duplicateCount += duplicates;
       if (!added.length) continue;
       const selectorsKey = siteSelectorsKey(hostname);
       const detailsKey = siteRuleDetailsKey(hostname);
-      changes[selectorsKey] = [...existing.map((rule) => rule.selector), ...added.map((rule) => rule.selector)];
-      changes[detailsKey] = { ...stored[detailsKey] };
+      const pausedKey = sitePausedKey(hostname);
+      const existingSelectors = existing.map((rule) => rule.selector);
+      const existingDetails = stored[pausedKey] === true
+        ? withRulePause(stored[detailsKey], existingSelectors, true) : stored[detailsKey];
+      changes[selectorsKey] = [...existingSelectors, ...added.map((rule) => rule.selector)];
+      changes[detailsKey] = { ...existingDetails };
+      if (stored[pausedKey] === true) changes[pausedKey] = false;
       for (const { selector, ...details } of added) {
         changes[detailsKey][ruleSelectorKey(selector)] = { ...details, id: crypto.randomUUID() };
       }
-      if (!existing.length && paused) changes[sitePausedKey(hostname)] = true;
     }
     if (addedCount) await chrome.storage.sync.set(changes);
     return { ok: true, addedCount, duplicateCount };
@@ -245,10 +267,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false });
       return;
     }
-    const key = sitePausedKey(hostname);
-    const update = siteRuleUpdates.then(() => paused ? chrome.storage.sync.set({ [key]: true }) : chrome.storage.sync.remove(key));
-    siteRuleUpdates = update.catch(() => {});
-    update.then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    updateSiteSelectors(hostname, { type, paused }).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   const replacement = typeof message.replacement === "string" ? message.replacement : "";
