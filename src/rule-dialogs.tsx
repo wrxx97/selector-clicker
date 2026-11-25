@@ -249,7 +249,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }: DialogCa
         </ul> : <label className="grid gap-1.5">
           规则 JSON
           <Textarea ref={input} id="backup-text" value={draft} onChange={(event) => setDraft(event.target.value)}
-            className="min-h-40 resize-y font-mono text-xs" spellCheck={false} readOnly={busy} />
+            className="min-h-[min(10rem,45dvh)] max-h-[min(18rem,45dvh)] resize-y overflow-y-auto font-mono text-xs" spellCheck={false} readOnly={busy} />
         </label>}
         <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
           {preview && source.type === "text" && <Button type="button" variant="ghost"
