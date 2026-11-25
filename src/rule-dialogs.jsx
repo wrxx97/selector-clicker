@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Toast, useToast } from "@/components/ui/toast";
 import { previewRuleImport, validateSelector } from "@/lib/backup";
-import { RULE_NAME_MAX_LENGTH, getExecutionOptions, send } from "@/lib/extension";
+import { RULE_NAME_MAX_LENGTH, getExecutionOptions, normalizeSiteHostname, send } from "@/lib/extension";
 
 function RuleDialogContent({ children, feedback, dismiss, ...props }) {
   return <DialogContent {...props} className="gap-0 p-0 sm:max-w-lg" showCloseButton={false}>
@@ -53,7 +53,7 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
         reportError(errors[result?.reason] || failure);
         return;
       }
-      onSaved(remove ? "已移除规则。" : "已保存修改。");
+      await onSaved(remove ? "已移除规则。" : "已保存修改。");
     } catch {
       reportError(failure);
     } finally {
@@ -105,6 +105,73 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }) {
   </Dialog>;
 }
 
+export function SiteDialog({ action, onClose, onSaved, returnFocus }) {
+  const { site, remove } = action;
+  const { hostname, rules } = site;
+  const [destination, setDestination] = useState(hostname);
+  const [saving, setSaving] = useState(false);
+  const { feedback, setFeedback, dismiss } = useToast();
+  const input = useRef(null);
+  const cancel = useRef(null);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (saving) return;
+    const target = normalizeSiteHostname(destination);
+    if (!remove && (!target || target === hostname)) {
+      setFeedback({ text: "请输入一个不同的有效主机名，例如 example.com。", error: true });
+      return;
+    }
+    setSaving(true);
+    setFeedback(null);
+    const failure = remove ? "删除站点规则失败，请重试。" : "修改站点失败，请重试。";
+    try {
+      const request = { hostname, expectedRuleIds: rules.map((rule) => rule.id) };
+      const result = await send(remove
+        ? { ...request, type: "remove-site-rules" }
+        : { ...request, type: "rename-site", destination: target });
+      if (!result?.ok) {
+        const errors = {
+          duplicate: "目标站点已有规则，请使用其他主机名。",
+          changed: "站点规则已变更，请关闭窗口后重新操作。"
+        };
+        setFeedback({ text: errors[result?.reason] || failure, error: true });
+        return;
+      }
+      await onSaved(remove ? "已删除该站点的全部规则。" : "已更新站点主机名。");
+    } catch {
+      setFeedback({ text: failure, error: true });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+    <RuleDialogContent feedback={feedback} dismiss={dismiss} onCloseAutoFocus={returnFocus}
+      onOpenAutoFocus={(event) => { event.preventDefault(); (remove ? cancel : input).current?.focus(); }}>
+      <DialogHeader>
+        <DialogTitle>{remove ? "删除此站点的全部规则？" : "编辑站点"}</DialogTitle>
+        <DialogDescription>{remove
+          ? `将删除 ${hostname} 的全部 ${rules.length} 条规则。此操作无法撤销。`
+          : `修改主机名会迁移 ${hostname} 的全部 ${rules.length} 条规则，目标网站需单独授权。`}</DialogDescription>
+      </DialogHeader>
+      <form id="site-form" className="grid gap-3" onSubmit={submit}>
+        {!remove && <label className="grid gap-1.5">
+          主机名
+          <Input ref={input} id="site-hostname" value={destination} onChange={(event) => setDestination(event.target.value)}
+            readOnly={saving} spellCheck={false} autoCapitalize="none" autoComplete="off" />
+        </label>}
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+          <Button ref={cancel} type="button" variant="outline" disabled={saving} onClick={onClose}>取消</Button>
+          <Button type="submit" variant={remove ? "destructive" : "default"} disabled={saving}>
+            {remove ? "删除全部规则" : "保存站点"}
+          </Button>
+        </div>
+      </form>
+    </RuleDialogContent>
+  </Dialog>;
+}
+
 export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState(source.preview);
@@ -133,7 +200,7 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }) {
       }
       const result = await send({ type: "import-rules", backup: preview.backup });
       if (!result?.ok) throw new Error("Could not import rules");
-      onSaved(`已导入 ${result.addedCount} 条规则，跳过 ${result.duplicateCount} 条重复规则。`);
+      await onSaved(`已导入 ${result.addedCount} 条规则，跳过 ${result.duplicateCount} 条重复规则。`);
     } catch (failure) {
       reportError(preview ? "导入失败，请检查浏览器同步存储空间后重试。" : failure.message);
     } finally {

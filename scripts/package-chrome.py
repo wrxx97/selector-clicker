@@ -42,6 +42,7 @@ def extension_files():
     files = {"manifest.json", *CONTENT_FILES, *pages, manifest["background"]["service_worker"]}
     files.update(manifest["icons"].values())
     files.update(action["default_icon"].values())
+    files.update(path.relative_to(DIST).as_posix() for path in (DIST / "icons").glob("*.png") if path.is_file())
 
     for page in pages:
         parser = PageAssets()

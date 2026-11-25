@@ -13,6 +13,8 @@ function createWorker(now = Date.now) {
   let permissionsAdded;
   let permissionsRemoved;
   let onMessage;
+  let storageChanged;
+  let lastIcon;
   let context;
   function loadScript(file) {
     const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
@@ -37,7 +39,10 @@ function createWorker(now = Date.now) {
     crypto,
     importScripts: loadScript,
     chrome: {
-      action: { setBadgeText() {}, setBadgeBackgroundColor() {} },
+      action: {
+        setBadgeText() {}, setBadgeBackgroundColor() {},
+        async setIcon({ path }) { lastIcon = structuredClone(path); }
+      },
       runtime: {
         getURL: (file) => `chrome-extension://test/${file}`,
         onInstalled: { addListener() {} },
@@ -58,7 +63,8 @@ function createWorker(now = Date.now) {
       },
       storage: {
         sync: storageArea(store),
-        local: storageArea(local)
+        local: storageArea(local),
+        onChanged: { addListener(listener) { storageChanged = listener; } }
       }
     }
   });
@@ -68,6 +74,11 @@ function createWorker(now = Date.now) {
     local,
     grantedOrigins,
     get registered() { return registered; },
+    get lastIcon() { return lastIcon; },
+    changeTheme(theme) {
+      store.set("uiTheme", theme);
+      return storageChanged({ uiTheme: { newValue: theme } }, "sync");
+    },
     onPermissionsAdded: (origins) => permissionsAdded({ origins }),
     onPermissionsRemoved: () => permissionsRemoved(),
     backup() {
@@ -81,6 +92,66 @@ function createWorker(now = Date.now) {
     }
   };
 }
+
+test("updates the static toolbar icon to the synced theme and falls back to blue", async () => {
+  const worker = createWorker();
+  await worker.changeTheme("rose");
+  assert.deepEqual(worker.lastIcon, {
+    16: "icons/icon-rose-16.png", 24: "icons/icon-rose-24.png", 32: "icons/icon-rose-32.png"
+  });
+  await worker.changeTheme("unknown");
+  assert.deepEqual(worker.lastIcon, {
+    16: "icons/icon-16.png", 24: "icons/icon-24.png", 32: "icons/icon-32.png"
+  });
+});
+
+test("edits a site without overwriting its destination and keeps its rule data and click history", async () => {
+  const worker = createWorker();
+  const hostname = "source.example";
+  const destination = "target.example";
+  const sender = { url: "chrome-extension://test/rules.html" };
+  const details = { "selector:#close": { id: "close", name: "Close", pathPrefix: "/tasks", maxClicks: 2 } };
+  worker.store.set("siteSelectors:source.example", ["#close"]);
+  worker.store.set("siteRuleDetails:source.example", details);
+  worker.store.set("sitePaused:source.example", true);
+  worker.store.set("siteSelectors:taken.example", ["#other"]);
+  worker.local.set("siteClickCounts:target.example", { "rule:close": 50 });
+  await worker.send({ type: "click-record", ruleIds: ["close"] }, { url: "https://source.example/", tab: { id: 1 } });
+  const lastClick = worker.local.get("siteLastClickTimes:source.example")["rule:close"];
+  const move = { type: "rename-site", hostname, destination, expectedRuleIds: ["close"] };
+
+  assert.deepEqual(await worker.send(move, { url: "https://source.example/" }), { ok: false });
+  assert.deepEqual(await worker.send({ ...move, destination: "taken.example" }, sender), { ok: false, reason: "duplicate" });
+  assert.deepEqual(await worker.send({ ...move, destination: "target.example:443" }, sender), { ok: false, reason: "invalid" });
+  assert.deepEqual(await worker.send({ ...move, expectedRuleIds: ["outdated"] }, sender), { ok: false, reason: "changed" });
+  assert.deepEqual(await worker.send({ ...move, destination: "TARGET.example" }, sender), { ok: true });
+  assert.deepEqual(worker.backup().sites.map(({ hostname: site }) => site), ["taken.example", destination]);
+  assert.deepEqual(structuredClone(worker.store.get("siteRuleDetails:target.example")), details);
+  assert.equal(worker.store.get("sitePaused:target.example"), true);
+  assert.equal(worker.local.get("siteClickCounts:target.example")["rule:close"], 1);
+  assert.equal(worker.local.get("siteLastClickTimes:target.example")["rule:close"], lastClick);
+  assert.equal(worker.local.get("totalClickCount"), 1);
+});
+
+test("deletes only the confirmed site's rules and refuses a stale confirmation", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const sender = { url: "chrome-extension://test/rules.html" };
+  worker.store.set("siteSelectors:example.com", ["#one", "#two"]);
+  worker.store.set("siteRuleDetails:example.com", { "selector:#one": { id: "first" } });
+  worker.store.set("sitePaused:example.com", true);
+  worker.store.set("siteSelectors:other.example", ["#one"]);
+  worker.local.set("totalClickCount", 10);
+  const request = { type: "remove-site-rules", hostname, expectedRuleIds: ["first", "selector:#two"] };
+
+  assert.deepEqual(await worker.send({ ...request, expectedRuleIds: ["first"] }, sender), { ok: false, reason: "changed" });
+  assert.deepEqual(await worker.send(request, sender), { ok: true });
+  assert.equal(worker.store.has("siteSelectors:example.com"), false);
+  assert.equal(worker.store.has("siteRuleDetails:example.com"), false);
+  assert.equal(worker.store.has("sitePaused:example.com"), false);
+  assert.deepEqual(worker.store.get("siteSelectors:other.example"), ["#one"]);
+  assert.equal(worker.local.get("totalClickCount"), 10);
+});
 
 test("concurrent saves keep both rules and deduplicate a selector on the same hostname", async () => {
   const worker = createWorker();

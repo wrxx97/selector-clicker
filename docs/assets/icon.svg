@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" color="#245f9c">
+  <g id="brand-mark" fill="none" stroke="currentColor" stroke-width="5.5"
+    stroke-linecap="round" stroke-linejoin="round">
+    <path pathLength="1" d="M57.2 97 A42 42 0 1 1 98 67.7" />
+    <path pathLength="1" d="M84 60.7 A26.6 26.6 0 1 0 53.5 81.2" />
+    <path pathLength="1" d="M105 105 L91 87 L108 82 L57.5 54 L69 107 L81 94 L95 113 Z" />
+  </g>
+</svg>

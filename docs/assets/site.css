@@ -21,6 +21,20 @@ a:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; border-ra
 h1, h2, h3, p, figure { margin: 0; }
 h1, h2, h3 { line-height: 1.2; }
 img { display: block; }
+.brand-icon { display: block; flex: none; color: var(--blue); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .brand-icon use {
+    stroke-dasharray: 1;
+    animation: draw-brand-icon 1s ease-in-out both;
+  }
+}
+
+@keyframes draw-brand-icon {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
 code { overflow-wrap: anywhere; }
 [id] { scroll-margin-top: 1.5rem; }
 
@@ -30,7 +44,6 @@ code { overflow-wrap: anywhere; }
 .site-header { background: var(--surface); border-bottom: 1px solid var(--line); }
 .nav, .footer { display: flex; justify-content: space-between; align-items: center; gap: 14px 24px; padding-block: 15px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 1.05rem; font-weight: 750; text-decoration: none; }
-.brand img { border-radius: 9px; }
 .nav nav, .footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 .nav nav a, .footer a { color: var(--muted); font-size: .9rem; font-weight: 550; text-decoration: none; }
 .nav nav a:hover, .nav nav a[aria-current="page"], .footer a:hover { color: var(--blue); text-decoration: underline; }
@@ -57,7 +70,6 @@ code { overflow-wrap: anywhere; }
 .demo-window { overflow: hidden; border: 1px solid #cee0f4; border-radius: 15px; background: white; box-shadow: 0 20px 40px -19px #234f8a58; }
 .demo-top { display: flex; align-items: center; gap: 10px; padding: 9px 11px; color: #496781; border-bottom: 1px solid var(--line); font-size: .73rem; font-weight: 600; }
 .demo-top > span { flex: 1; padding: 4px 9px; border-radius: 6px; background: #edf4fc; }
-.demo-top img { border-radius: 5px; }
 .window-dots { display: flex; gap: 4px; }
 .window-dots i { width: 5px; height: 5px; border-radius: 50%; background: #91afd2; }
 .demo-page { position: relative; display: grid; place-items: center; min-height: 196px; isolation: isolate; padding: 18px 18px 22px; background: #f3f7fc; }

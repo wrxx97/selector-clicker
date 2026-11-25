@@ -8,7 +8,20 @@ const DEFAULTS = {
 let siteRuleUpdates = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
 let siteAccessUpdates = Promise.resolve();
+let toolbarIconUpdates = Promise.resolve();
 const SITE_SCRIPT_ID = "selector-clicker-sites";
+const toolbarThemes = new Set(["lavender", "rose", "amber", "night"]);
+
+function updateToolbarIcon() {
+  const update = toolbarIconUpdates.then(async () => {
+    const { uiTheme } = await chrome.storage.sync.get({ uiTheme: "sky" });
+    const suffix = toolbarThemes.has(uiTheme) ? uiTheme + "-" : "";
+    const path = Object.fromEntries([16, 24, 32].map((size) => [size, `icons/icon-${suffix}${size}.png`]));
+    await chrome.action.setIcon({ path });
+  });
+  toolbarIconUpdates = update.catch(() => {});
+  return update;
+}
 
 function updateSiteAccess(granted = []) {
   const update = siteAccessUpdates.then(async () => {
@@ -161,6 +174,69 @@ function recordClickStats(hostname, ruleIds) {
   return update;
 }
 
+function copySiteStats(hostname, destination, rules) {
+  const update = clickStatsUpdates.then(async () => {
+    const sourceCounts = siteClickCountsKey(hostname);
+    const sourceTimes = siteLastClickTimesKey(hostname);
+    const targetCounts = siteClickCountsKey(destination);
+    const targetTimes = siteLastClickTimesKey(destination);
+    const stored = await chrome.storage.local.get({
+      [sourceCounts]: {}, [sourceTimes]: {}, [targetCounts]: {}, [targetTimes]: {}
+    });
+    const changes = {};
+    for (const [from, to] of [[sourceCounts, targetCounts], [sourceTimes, targetTimes]]) {
+      const updated = { ...stored[to] };
+      for (const { id } of rules) {
+        const key = `rule:${id}`;
+        const value = stored[from][key];
+        if (updated[key] === value) continue;
+        if (value === undefined) delete updated[key];
+        else updated[key] = value;
+        changes[to] = updated;
+      }
+    }
+    if (Object.keys(changes).length) await chrome.storage.local.set(changes);
+  });
+  clickStatsUpdates = update.catch(() => {});
+  return update;
+}
+
+function updateSiteGroup({ hostname, destination, expectedRuleIds, type }) {
+  const selectors = siteSelectorsKey(hostname);
+  const details = siteRuleDetailsKey(hostname);
+  const paused = sitePausedKey(hostname);
+  const update = siteRuleUpdates.then(async () => {
+    const target = type === "rename-site" ? normalizeSiteHostname(destination) : "";
+    if (type === "rename-site" && (!target || target === hostname)) return { ok: false, reason: "invalid" };
+    const targetSelectors = siteSelectorsKey(target);
+    const stored = await chrome.storage.sync.get({
+      [selectors]: [], [details]: {}, [paused]: false, ...(target ? { [targetSelectors]: [] } : {})
+    });
+    const rules = getSiteRules(stored, hostname);
+    if (!rules.length || rules.length !== expectedRuleIds.length ||
+        rules.some((rule, index) => rule.id !== expectedRuleIds[index])) {
+      return { ok: false, reason: "changed" };
+    }
+    if (!target) {
+      await chrome.storage.sync.remove([selectors, details, paused]);
+      return { ok: true };
+    }
+    if (getSiteRules(stored, target).length) return { ok: false, reason: "duplicate" };
+
+    // Copy local history before publishing the move so a failed copy leaves the source rules intact.
+    await copySiteStats(hostname, target, rules);
+    await chrome.storage.sync.set({
+      [targetSelectors]: stored[selectors],
+      [siteRuleDetailsKey(target)]: stored[details],
+      [sitePausedKey(target)]: stored[paused] === true,
+      [selectors]: [], [details]: {}, [paused]: false
+    });
+    return { ok: true };
+  });
+  siteRuleUpdates = update.catch(() => {});
+  return update;
+}
+
 function importRules(backup) {
   const update = siteRuleUpdates.then(async () => {
     const sites = parseRuleBackup(backup);
@@ -201,10 +277,13 @@ function importRules(backup) {
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get(DEFAULTS);
   await chrome.storage.sync.set(existing);
-  await updateSiteAccess().catch(() => {});
+  await Promise.allSettled([updateSiteAccess(), updateToolbarIcon()]);
 });
 
-chrome.runtime.onStartup.addListener(() => updateSiteAccess().catch(() => {}));
+chrome.runtime.onStartup.addListener(() => Promise.allSettled([updateSiteAccess(), updateToolbarIcon()]));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.uiTheme) return updateToolbarIcon().catch(() => {});
+});
 chrome.permissions.onAdded.addListener(({ origins }) => updateSiteAccess(origins).catch(() => {}));
 chrome.permissions.onRemoved.addListener(() => updateSiteAccess().catch(() => {}));
 
@@ -220,6 +299,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (matches) => sendResponse({ ok: matches.includes(pattern) }),
       () => sendResponse({ ok: false })
     );
+    return true;
+  }
+  if (message.type === "rename-site" || message.type === "remove-site-rules") {
+    const { hostname, expectedRuleIds } = message;
+    if (sender.url !== chrome.runtime.getURL("rules.html") || !hostname ||
+        normalizeSiteHostname(hostname) !== hostname || !Array.isArray(expectedRuleIds) ||
+        !expectedRuleIds.every((id) => typeof id === "string" && id)) {
+      sendResponse({ ok: false });
+      return;
+    }
+    updateSiteGroup(message).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   if (message.type === "import-rules") {

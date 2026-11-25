@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@custom-variant dark (&:where([data-ui-theme="night"], [data-ui-theme="night"] *));
 @custom-variant data-open (&[data-state="open"]);
 @custom-variant data-closed (&[data-state="closed"]);
 @custom-variant data-checked (&[data-state="checked"]);
@@ -17,18 +18,22 @@
   --color-popover: var(--card);
   --color-popover-foreground: var(--foreground);
   --color-primary: var(--primary);
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #e4effd;
-  --color-secondary-foreground: #22538b;
-  --color-muted: #eff5fd;
-  --color-muted-foreground: #4b6281;
-  --color-accent: #ebf4ff;
-  --color-accent-foreground: #174476;
-  --color-destructive: #ac3443;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #d6e4f5;
-  --color-input: #c6d8ef;
-  --color-ring: #3b79ba;
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--primary);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--primary);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-border: var(--destructive-border);
+  --color-paused: var(--paused);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--primary);
+  --color-banner-start: var(--banner-start);
+  --color-banner-end: var(--banner-end);
   --radius-sm: 6px;
   --radius-md: 9px;
   --radius-lg: 12px;
@@ -41,6 +46,59 @@
   --foreground: #152f50;
   --card: #ffffff;
   --primary: #245f9c;
+  --primary-foreground: #ffffff;
+  --muted-foreground: #4b6281;
+  --tone: #78a8e1;
+  --destructive: #ac3443;
+  --destructive-foreground: #ffffff;
+  --destructive-border: #e7adb5;
+  --paused: #fff0f1;
+  --secondary: color-mix(in srgb, var(--tone) 20%, var(--card));
+  --muted: color-mix(in srgb, var(--tone) 12%, var(--card));
+  --accent: color-mix(in srgb, var(--tone) 16%, var(--card));
+  --border: color-mix(in srgb, var(--tone) 30%, var(--card));
+  --input: color-mix(in srgb, var(--tone) 40%, var(--card));
+  --banner-start: color-mix(in srgb, var(--tone) 17%, var(--card));
+  --banner-end: color-mix(in srgb, var(--tone) 34%, var(--card));
+}
+
+:root[data-ui-theme="lavender"] {
+  --background: #f8f3ff;
+  --foreground: #35274d;
+  --primary: #633ba0;
+  --muted-foreground: #66517d;
+  --tone: #ad87df;
+}
+
+:root[data-ui-theme="rose"] {
+  --background: #fff4f8;
+  --foreground: #4b2640;
+  --primary: #9a376e;
+  --muted-foreground: #7a5268;
+  --tone: #e88fb5;
+}
+
+:root[data-ui-theme="amber"] {
+  --background: #fff7eb;
+  --foreground: #492f1c;
+  --primary: #8c4616;
+  --muted-foreground: #765338;
+  --tone: #e9a364;
+}
+
+:root[data-ui-theme="night"] {
+  color-scheme: dark;
+  --background: #101828;
+  --foreground: #edf4ff;
+  --card: #172239;
+  --primary: #a5caff;
+  --primary-foreground: #102139;
+  --muted-foreground: #bac9e1;
+  --tone: #6788cb;
+  --destructive: #ffadb8;
+  --destructive-foreground: #36131c;
+  --destructive-border: #8b5064;
+  --paused: #3b2334;
 }
 
 @layer base {
@@ -55,6 +113,18 @@
   button:not(:disabled) {
     cursor: pointer;
   }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .brand-icon use {
+    stroke-dasharray: 1;
+    animation: draw-brand-icon 1s ease-in-out both;
+  }
+}
+
+@keyframes draw-brand-icon {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -33,7 +33,7 @@ export function Toast({ feedback, dismiss, className = "fixed inset-x-3.5 bottom
     <span className="sr-only" role="status" aria-atomic="true">{feedback?.text}</span>
     {feedback && <div className={`pointer-events-auto flex items-start gap-2 rounded-xl border bg-card p-2.5 text-xs
       leading-relaxed shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-150 ${
-        feedback.error ? "border-red-200 text-destructive" : "border-input text-primary"
+        feedback.error ? "border-destructive-border text-destructive" : "border-input text-primary"
       }`}>
       <Icon size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <p className="min-w-0 flex-1 self-center" aria-hidden="true">{feedback.text}</p>

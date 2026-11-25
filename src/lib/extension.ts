@@ -11,8 +11,11 @@ const ruleData = globalThis as typeof globalThis & {
   SITE_SELECTORS_PREFIX: string;
   SITE_RULE_DETAILS_PREFIX: string;
   SITE_PAUSED_PREFIX: string;
+  SITE_CLICK_COUNTS_PREFIX: string;
+  SITE_LAST_CLICK_TIMES_PREFIX: string;
   SITE_SCRIPT_FILES: string[];
   getSiteHostname(url?: string): string;
+  normalizeSiteHostname(value: string): string;
   getSiteAccessPattern(url?: string): string;
   siteSelectorsKey(hostname: string): string;
   siteRuleDetailsKey(hostname: string): string;
@@ -29,7 +32,7 @@ const ruleData = globalThis as typeof globalThis & {
 
 export const {
   RULE_NAME_MAX_LENGTH, TOTAL_CLICK_COUNT_KEY, AUTHORIZED_SITES_KEY, getExecutionOptions,
-  getRuleSites, getSiteRules, siteClickCountsKey, siteLastClickTimesKey,
+  getRuleSites, getSiteRules, normalizeSiteHostname, siteClickCountsKey, siteLastClickTimesKey,
   createRuleBackup, parseRuleBackup, planRuleImport
 } = ruleData;
 
@@ -79,6 +82,11 @@ export function isRuleChange(changes: StorageChanges, hostname?: string) {
   return hostname
     ? prefixes.some((prefix) => Object.hasOwn(changes, prefix + hostname))
     : Object.keys(changes).some((key) => prefixes.some((prefix) => key.startsWith(prefix)));
+}
+
+export function isStatsKey(key: string) {
+  return key === TOTAL_CLICK_COUNT_KEY ||
+    key.startsWith(ruleData.SITE_CLICK_COUNTS_PREFIX) || key.startsWith(ruleData.SITE_LAST_CLICK_TIMES_PREFIX);
 }
 
 export function listenToStorage(listener: (changes: StorageChanges, area: string) => void) {

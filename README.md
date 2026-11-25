@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/icon-128.png" width="80" height="80" alt="Selector Clicker 图标">
+  <img src="docs/assets/icon.svg" width="80" height="80" alt="Selector Clicker 图标">
 </p>
 
 <h1 align="center">Selector Clicker</h1>
@@ -46,7 +46,7 @@
 
 ## 管理站点规则
 
-点击弹窗右下角的设置图标可查看所有网站的规则。管理页可以调整同一元素的冷却时间，以毫秒为单位，`2000` 表示 2 秒。加减按钮每次调整 1 秒，修改后自动生效。支持按主机名、备注或 CSS 选择器搜索、编辑规则和移除规则。新增的备注随规则通过浏览器同步。
+点击弹窗右下角的设置图标可查看所有网站的规则。管理页可以选择浅蓝、梦幻紫、蜜桃粉、暖橙或夜间主题，主题同步应用到弹窗和管理页。管理页也可以调整同一元素的冷却时间，以毫秒为单位，`2000` 表示 2 秒。加减按钮每次调整 1 秒，修改后自动生效。支持按主机名、备注或 CSS 选择器搜索，也可以编辑规则、迁移站点主机名或删除某个站点的全部规则。新增的备注随规则通过浏览器同步。
 
 编辑规则时，可填写生效路径。例如 `/dashboard` 匹配该路径及其子路径。每页点击上限从页面加载时开始计数，留空或填 `0` 表示不限次数。
 
@@ -98,5 +98,5 @@ pnpm run build
 本地构建后，可使用 Python 3.10 或更新版本将 `dist/` 打成 ZIP。
 
 ```powershell
-python scripts/package-chrome.py selector-clicker-1.3.0.zip
+python scripts/package-chrome.py selector-clicker-1.4.0.zip
 ```

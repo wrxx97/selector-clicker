@@ -129,6 +129,7 @@
       ...nextConfig,
       cooldown: Math.max(1000, Number(nextConfig.cooldown) || DEFAULTS.cooldown)
     };
+    const hadRules = siteRules.length > 0;
     siteRules = getSiteRules(config, hostname);
 
     window.clearTimeout(mutationTimer);
@@ -138,7 +139,7 @@
       if (scanImmediately) scan();
     } else {
       observer.disconnect();
-      if (!config.enabled || !siteAuthorized || siteRules.length) chrome.runtime.sendMessage({ type: "reset-badge" });
+      if (!config.enabled || !siteAuthorized || hadRules || siteRules.length) chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 

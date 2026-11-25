@@ -7,7 +7,9 @@ import tailwindcss from "@tailwindcss/vite";
 const root = import.meta.dirname;
 const runtimeFiles = [
   "manifest.json", "site-rules.js", "picker.js", "content.js", "service-worker.js",
-  ...[16, 24, 32, 48, 128].map((size) => `icons/icon-${size}.png`)
+  ...[16, 24, 32, 48, 128].map((size) => `icons/icon-${size}.png`),
+  ...["lavender", "rose", "amber", "night"].flatMap((theme) =>
+    [16, 24, 32].map((size) => `icons/icon-${theme}-${size}.png`))
 ];
 
 const extensionAssets = {

@@ -15,8 +15,8 @@ export function PopupFooter() {
   const { busy, manage } = usePopupStore(useShallow((state) => ({ busy: state.siteBusy, manage: state.manage })));
   return <footer className="flex items-center justify-between gap-2">
     <ClickStats />
-    <div className="flex shrink-0 items-center gap-0.5">
-      <Button asChild size="icon-sm" variant="ghost" className="text-primary">
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Button asChild size="icon" variant="secondary" className="rounded-full">
         <a href="https://github.com/wrxx97/selector-clicker/releases" target="_blank" rel="noopener noreferrer"
           aria-label="GitHub Releases" title="GitHub Releases">
           <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -24,8 +24,8 @@ export function PopupFooter() {
           </svg>
         </a>
       </Button>
-      <Button id="manage-rules" type="button" size="icon-sm" variant="ghost"
-        className="text-primary" aria-label="设置" title="设置" disabled={busy} onClick={manage}>
+      <Button id="manage-rules" type="button" size="icon" variant="default"
+        className="rounded-full" aria-label="设置" title="设置" disabled={busy} onClick={manage}>
         <Settings />
       </Button>
     </div>

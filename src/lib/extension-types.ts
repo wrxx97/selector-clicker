@@ -53,6 +53,8 @@ export interface PageResponses {
 export type WorkerRequest =
   | { type: "authorize-site"; pattern: string }
   | { type: "set-site-paused"; hostname: string; paused: boolean }
+  | { type: "rename-site"; hostname: string; destination: string; expectedRuleIds: string[] }
+  | { type: "remove-site-rules"; hostname: string; expectedRuleIds: string[] }
   | { type: "set-rule-paused"; hostname: string; selector: string; expectedId: string; paused: boolean }
   | { type: "remove-site-selector"; hostname: string; selector: string; expectedId?: string }
   | { type: "edit-site-selector"; hostname: string; selector: string; expectedId: string; replacement: string; name: string; pathPrefix: string; maxClicks: number }

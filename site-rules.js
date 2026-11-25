@@ -19,6 +19,14 @@ function getSiteHostname(url) {
   }
 }
 
+function normalizeSiteHostname(value) {
+  if (typeof value !== "string") return "";
+  const input = value.trim();
+  if (!input || /[\s/?#@\\*%]/.test(input)) return "";
+  if (input.includes(":") && !(input.startsWith("[") && input.endsWith("]"))) return "";
+  return getSiteHostname("https://" + input);
+}
+
 function getSiteAccessPattern(url) {
   const hostname = getSiteHostname(url);
   if (!hostname || hostname.includes("*")) return "";

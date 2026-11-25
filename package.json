@@ -1,6 +1,6 @@
 {
   "name": "selector-clicker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Selector Clicker browser extension.",
   "packageManager": "pnpm@10.14.0",
