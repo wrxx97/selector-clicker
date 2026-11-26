@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { startLanguage } from "@/lib/i18n";
 import { startTheme } from "@/lib/theme";
 import { PopupToast } from "./feedback";
 import { PopupHeader } from "./header";
@@ -10,6 +11,7 @@ import "../styles/theme.css";
 import "./popup.css";
 
 function Popup() {
+  useEffect(() => startLanguage("appName"), []);
   useEffect(startTheme, []);
   useEffect(startPopup, []);
   return <main className="grid w-96 max-w-full gap-3 p-3.5 text-sm">

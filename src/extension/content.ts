@@ -1,4 +1,5 @@
 declare var selectorClickerContentLoaded: boolean | undefined;
+declare var selectorClickerPicker: typeof import("./picker");
 type ContentPageResponses = import("../lib/extension-types").PageResponses;
 type ClickTarget = Element & { click(): void };
 type RuleInspection =
@@ -27,23 +28,23 @@ type RuleInspection =
   let siteAuthorized = false;
   let initialized = false;
   let authorizationChanged = false;
+  let languageChanged = false;
+  const { languageStorageKey: languageKey, normalizePreference, resolveLocale, createElementPicker } = selectorClickerPicker;
   const pendingSettings: RuntimeStored = {};
   let ruleHighlight: Animation | undefined;
   let siteRules: RuntimeRule[] = [];
   const lastClicks = new WeakMap<Element, number>();
   const ruleClicks = new Map<string, number>();
   const picker = createElementPicker(async (selector, name, editing) => {
-    if (!siteAuthorized) throw new Error("当前站点的访问权限已撤销。");
+    if (!siteAuthorized) return "pickerAccessRevoked";
     const message = editing
       ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
       : { type: "save-site-selector", selector, name };
     const response: import("../lib/extension-types").WorkerResponse | undefined = await chrome.runtime.sendMessage(message);
     if (response?.ok) return;
-    const errors: Record<string, string> = {
-      missing: "规则已变更，请重新打开扩展。",
-      duplicate: "这个元素已有规则，请选取其他元素。"
-    };
-    throw new Error(errors[response?.reason ?? ""] || "保存失败，请重试。");
+    if (response?.reason === "missing") return "pickerRuleChanged";
+    if (response?.reason === "duplicate") return "pickerDuplicate";
+    return "pickerSaveError";
   }, scheduleScan);
 
   function isVisible(element: Element) {
@@ -156,10 +157,11 @@ type RuleInspection =
   (window as Window & { navigation?: EventTarget }).navigation?.addEventListener("currententrychange", scheduleScan);
 
   const initialConfig = Promise.all([
-    chrome.storage.sync.get(DEFAULTS),
+    chrome.storage.sync.get({ ...DEFAULTS, [languageKey]: "auto" }),
     chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] })
   ]).then(([settings, local]) => {
     if (!authorizationChanged) siteAuthorized = storageStrings(local[AUTHORIZED_SITES_KEY]).includes(accessPattern);
+    if (!languageChanged) picker.setLocale(resolveLocale(normalizePreference(settings[languageKey])));
     applyConfig({ ...settings, ...pendingSettings });
     initialized = true;
   });
@@ -175,6 +177,10 @@ type RuleInspection =
       return;
     }
     if (areaName !== "sync") return;
+    if (changes[languageKey]) {
+      languageChanged = true;
+      picker.setLocale(resolveLocale(normalizePreference(changes[languageKey].newValue)));
+    }
     const changedKeys = Object.keys(DEFAULTS).filter((key) => Object.hasOwn(changes, key));
     if (!changedKeys.length) return;
     const changedConfig = initialized ? { ...config } : pendingSettings;

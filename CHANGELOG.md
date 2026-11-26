@@ -1,5 +1,17 @@
 # Selector Clicker 更新日志
 
+## [1.5.0]
+
+- **简体中文和英文**。在规则管理页可选择跟随浏览器、简体中文或 English。设置会同步保存，弹窗、规则管理页和网页选取器即时切换。
+- **Apache-2.0 许可证**。安装包附带项目许可证、NOTICE 和第三方许可声明。
+- **翻译检查**。界面使用 i18next 和 react-i18next。发布前自动检查漏译和占位符。
+
+### English
+
+- **Simplified Chinese and English.** Follow the browser language or choose either language in Rule Manager. Your preference syncs and applies immediately to the popup, Rule Manager, and on-page picker.
+- **Apache-2.0 licensing.** The ZIP includes the project license, NOTICE, and third-party license notices.
+- **Translation checks.** The UI uses i18next and react-i18next. Release builds check for missing translations and mismatched placeholders.
+
 ## [1.4.1]
 
 - **自动填写规则备注**。选中元素后，用元素里的可见文字填入备注。保存前可手动修改，重新选取已有规则时优先保留原备注。

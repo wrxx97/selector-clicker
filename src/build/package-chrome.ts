@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/pro
 import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { zipSync } from "fflate";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
-import { runtimeScripts } from "./runtime-scripts.ts";
+import { manifestLocalePath, manifestLocales, runtimeScripts } from "./runtime-scripts.ts";
 
 const project = resolve(import.meta.dirname, "../..");
 const dist = resolve(project, "dist");
@@ -39,7 +39,10 @@ async function collectFiles() {
   const worker = manifest.background?.service_worker;
   if (!popup || !options || !worker) throw new Error("The manifest is missing an extension entry.");
 
-  const files = new Set(["manifest.json", ...runtimeScripts, popup, options, worker]);
+  const files = new Set([
+    "manifest.json", "LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md",
+    ...manifestLocales.map(manifestLocalePath), ...runtimeScripts, popup, options, worker
+  ]);
   for (const icon of Object.values(manifest.icons ?? {})) files.add(icon);
   const actionIcons = manifest.action?.default_icon;
   if (typeof actionIcons === "string") files.add(actionIcons);

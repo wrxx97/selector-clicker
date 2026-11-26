@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Rule } from "@/lib/extension-types";
+import { useTranslation } from "react-i18next";
 import { usePopupStore } from "./store";
 
 interface RuleRowProps {
@@ -15,6 +16,7 @@ interface RuleRowProps {
 }
 
 const RuleRow = memo(function RuleRow({ rule, expanded, authorized, busy, setExpanded }: RuleRowProps) {
+  const { t } = useTranslation();
   const trigger = useRef<HTMLButtonElement>(null);
   const actionsId = useId();
   const label = rule.name || rule.selector;
@@ -44,51 +46,53 @@ const RuleRow = memo(function RuleRow({ rule, expanded, authorized, busy, setExp
       <code className="block truncate text-xs leading-3.5 text-muted-foreground" title={rule.selector}>{rule.selector}</code>
     </div>
     <Button ref={trigger} type="button" size="icon-xs" variant="outline" className="absolute top-1/2 right-1.5 z-10 -translate-y-1/2 border-input bg-card text-primary"
-      aria-label={`${expanded ? "收起" : "显示"}规则操作 ${label}`} aria-expanded={expanded}
-      aria-controls={actionsId} title={expanded ? "收起操作" : "规则操作"} onClick={() => expand(!expanded)}>
+      aria-label={t(expanded ? "hideRuleActions" : "showRuleActions", { label })} aria-expanded={expanded}
+      aria-controls={actionsId} title={expanded ? t("collapseActions") : t("actions")} onClick={() => expand(!expanded)}>
       <Ellipsis />
     </Button>
-    <div id={actionsId} className="popup-rule-actions" role="group" aria-label={`规则操作 ${label}`} inert={!expanded}>
+    <div id={actionsId} className="popup-rule-actions" role="group" aria-label={t("actionsForRule", { label })} inert={!expanded}>
       <Button size="xs" variant="secondary" disabled={!authorized} aria-disabled={busy || undefined}
-        aria-label={`测试规则 ${label}`} onClick={() => usePopupStore.getState().diagnose(rule)}>测试</Button>
+        aria-label={t("testRule", { label })} onClick={() => usePopupStore.getState().diagnose(rule)}>{t("test")}</Button>
       <Button size="xs" variant="outline" className="bg-card text-primary" aria-disabled={busy || undefined}
-        aria-label={`${rule.paused ? "恢复" : "暂停"}规则 ${label}`}
+        aria-label={t(rule.paused ? "resumeRule" : "pauseRule", { label })}
         onClick={() => usePopupStore.getState().pause({ selector: rule.selector, expectedId: rule.id, paused: !rule.paused })}>
-        {rule.paused ? "恢复" : "暂停"}
+        {rule.paused ? t("resume") : t("pause")}
       </Button>
       <Button size="xs" variant="outline" className="bg-card text-primary" aria-disabled={busy || undefined}
-        aria-label={`重新选取规则 ${label}`} onClick={() => usePopupStore.getState().pick(rule)}>重新选取</Button>
+        aria-label={t("repickRule", { label })} onClick={() => usePopupStore.getState().pick(rule)}>{t("repick")}</Button>
       <Button size="xs" variant="destructive" aria-disabled={busy || undefined}
-        aria-label={`移除规则 ${label}`} onClick={() => usePopupStore.getState().remove(rule)}>移除</Button>
+        aria-label={t("removeRule", { label })} onClick={() => usePopupStore.getState().remove(rule)}>{t("remove")}</Button>
     </div>
   </li>;
 });
 
-const RuleToolbar = memo(function RuleToolbar({ count, paused }: { count: number; paused: boolean }) {
+const RuleToolbar = memo(function RuleToolbar({ count: ruleCount, paused }: { count: number; paused: boolean }) {
+  const { t } = useTranslation();
   const { initialized, authorized, connected, busy, settingsBusy, pause, scan, authorize } = usePopupStore(useShallow((state) => ({
     initialized: state.initialized, authorized: state.authorized, connected: state.connected, busy: state.siteBusy,
     settingsBusy: state.settingsBusy,
     pause: state.pause, scan: state.scan, authorize: state.authorize
   })));
   return <div className="flex flex-wrap items-center gap-1.5">
-    <Badge variant="secondary">{count} 条规则</Badge>
+    <Badge variant="secondary">{t("rules", { count: ruleCount })}</Badge>
     <div className="flex items-center gap-1.5">
-      {count > 0 && <Button id="pause-site" size="sm" variant="outline" className="border-input text-primary" disabled={busy}
+      {ruleCount > 0 && <Button id="pause-site" size="sm" variant="outline" className="border-input text-primary" disabled={busy}
         onClick={() => pause({ paused: !paused })}>
-        {paused ? <Play /> : <Pause />} {paused ? "恢复当前站点" : "暂停当前站点"}
+        {paused ? <Play /> : <Pause />} {paused ? t("resumeCurrentSite") : t("pauseCurrentSite")}
       </Button>}
       <Button id="scan-now" size="sm" variant="outline" className="border-input text-primary"
         disabled={!initialized || !connected || busy || settingsBusy} onClick={scan}>
-        <RotateCw /> 立即扫描
+        <RotateCw /> {t("scanNow")}
       </Button>
     </div>
-    {count > 0 && !authorized && <Button id="authorize-site" size="sm" variant="outline" disabled={busy} onClick={authorize}>
-      <ShieldCheck /> 授权当前站点
+    {ruleCount > 0 && !authorized && <Button id="authorize-site" size="sm" variant="outline" disabled={busy} onClick={authorize}>
+      <ShieldCheck /> {t("authorizeSite")}
     </Button>}
   </div>;
 });
 
 export function RuleList() {
+  const { t } = useTranslation();
   const { site, rules, authorized, busy } = usePopupStore(useShallow((state) => ({
     site: state.site, rules: state.rules, authorized: state.authorized, busy: state.siteBusy
   })));
@@ -98,7 +102,7 @@ export function RuleList() {
   }, []);
 
   if (!site) return null;
-  return <section aria-label="站点规则" className="grid gap-2 border-t pt-2.5">
+  return <section aria-label={t("siteRules")} className="grid gap-2 border-t pt-2.5">
     <RuleToolbar count={rules.length} paused={rules.every((rule) => rule.paused)} />
     {rules.length > 0 && <ul id="site-rule-list" className="popup-rule-list grid max-h-[12.5rem] grid-cols-1 gap-1 overflow-x-hidden overflow-y-auto pr-0.5">
       {rules.map((rule) => <RuleRow key={rule.id} rule={rule} expanded={open === rule.id}

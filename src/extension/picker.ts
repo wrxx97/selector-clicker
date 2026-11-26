@@ -1,6 +1,16 @@
-type PickerSession = { host: HTMLElement; controller: AbortController; finish(saved?: boolean): void };
+import type { TOptions } from "i18next";
+import { createI18n, resolveLocale, type ExtensionLocale, type TranslationKey } from "../i18n/core";
+
+export { languageStorageKey, normalizePreference, resolveLocale } from "../i18n/core";
+
+interface PickerSession {
+  host: HTMLElement;
+  controller: AbortController;
+  finish(saved?: boolean): void;
+  localize(): void;
+}
 type PickerSelection = { target: HTMLElement; selector: string };
-type PickerSave = (selector: string, name: string, editing?: RuntimeRule) => Promise<void>;
+type PickerSave = (selector: string, name: string, editing?: RuntimeRule) => Promise<TranslationKey | void>;
 
 var PICKER_CONTROL = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [onclick]';
 var PICKER_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "aria-label", "name", "title"];
@@ -128,15 +138,18 @@ var PICKER_STYLES = `
   button:disabled { opacity: .55; cursor: default; }
 `;
 
-function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
+export function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
   let session: PickerSession | undefined;
+  let locale = resolveLocale("auto");
+  let translations: ReturnType<typeof createI18n> | undefined;
 
   function start(hostname: string, editing?: RuntimeRule) {
     if (session?.host.isConnected) return;
     session?.controller.abort();
+    const i18n = translations ??= createI18n(locale);
+    const { t } = i18n;
 
     const host = document.createElement("selector-clicker-picker");
-    host.lang = "zh-CN";
     const shadow = host.attachShadow({ mode: "closed" });
     const styles = new CSSStyleSheet();
     styles.replaceSync(PICKER_STYLES);
@@ -144,10 +157,9 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
     const controller = new AbortController();
     const { signal } = controller;
 
-    function createNode<Tag extends keyof HTMLElementTagNameMap>(tag: Tag, className: string, text?: string) {
+    function createNode<Tag extends keyof HTMLElementTagNameMap>(tag: Tag, className: string) {
       const node = document.createElement(tag);
       node.className = className;
-      if (text) node.textContent = text;
       return node;
     }
 
@@ -158,16 +170,16 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
     const status = createNode("p", "status");
     status.setAttribute("role", "status");
     const preview = createNode("code", "selector");
-    const nameField = createNode("label", "name-field", "备注名称（选填）");
+    const nameField = createNode("label", "name-field");
+    const nameCaption = document.createTextNode("");
     const nameInput = createNode("input", "");
     nameInput.type = "text";
     nameInput.maxLength = RULE_NAME_MAX_LENGTH;
-    nameInput.placeholder = "例如关闭活动弹窗";
-    nameField.append(nameInput);
+    nameField.append(nameCaption, nameInput);
     const actions = createNode("div", "actions");
-    const cancel = createNode("button", "", "取消");
-    const retry = createNode("button", "", "重新选取");
-    const save = createNode("button", "save", "保存规则");
+    const cancel = createNode("button", "");
+    const retry = createNode("button", "");
+    const save = createNode("button", "save");
     for (const button of [cancel, retry, save]) button.type = "button";
     actions.append(cancel, retry, save);
     panel.append(title, status, preview, nameField, actions);
@@ -176,6 +188,29 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
     let hovered: HTMLElement | null;
     let selected: PickerSelection | null;
     let saving = false;
+    let titleKey: TranslationKey = editing ? "pickerRepickTitle" : "pickerPickTitle";
+    let statusMessage: [TranslationKey, TOptions] = ["pickerInstructions", {}];
+
+    function setTitle(key: TranslationKey) {
+      titleKey = key;
+      title.textContent = t(key);
+    }
+
+    function setStatus(key: TranslationKey, options: TOptions = {}) {
+      statusMessage = [key, options];
+      status.textContent = t(...statusMessage);
+    }
+
+    function localize() {
+      host.lang = i18n.language;
+      title.textContent = t(titleKey);
+      status.textContent = t(...statusMessage);
+      nameCaption.data = t("ruleNameOptional");
+      nameInput.placeholder = t("pickerNamePlaceholder");
+      cancel.textContent = t("cancel");
+      retry.textContent = t("pickAgain");
+      save.textContent = t("saveRule");
+    }
 
     function updateOutline() {
       const target = selected?.target || hovered;
@@ -198,8 +233,8 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
       nameInput.value = editing?.name || "";
       actions.hidden = true;
       panel.classList.remove("confirming");
-      title.textContent = editing ? "重新选取规则目标" : "选取要自动点击的元素";
-      status.textContent = "移动鼠标高亮元素，单击选取。按 Esc 取消。";
+      setTitle(editing ? "pickerRepickTitle" : "pickerPickTitle");
+      setStatus("pickerInstructions");
       updateOutline();
     }
 
@@ -219,8 +254,8 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
       preview.hidden = true;
       nameField.hidden = true;
       panel.classList.remove("confirming");
-      title.textContent = "规则已保存";
-      status.textContent = `适用网站：${hostname}`;
+      setTitle("pickerSaved");
+      setStatus("pickerSite", { hostname });
       window.setTimeout(() => host.remove(), 1800);
     }
 
@@ -245,7 +280,7 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
       const target = targetAt(event);
       const selector = target && getPickerSelector(target);
       if (!target || !selector) {
-        status.textContent = "无法定位这个元素，请选取网页主框架中的按钮或链接。";
+        setStatus("pickerCannotLocate");
         return;
       }
       const count = document.querySelectorAll(selector).length;
@@ -257,8 +292,8 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
         target.innerText.replace(/\s+/g, " ").trim().slice(0, RULE_NAME_MAX_LENGTH).trimEnd();
       actions.hidden = false;
       panel.classList.add("confirming");
-      title.textContent = "确认站点规则";
-      status.textContent = `当前页面匹配 ${count} 个元素。仅在 ${hostname} 生效。`;
+      setTitle("pickerConfirm");
+      setStatus("pickerMatch", { matches: count, hostname });
       updateOutline();
       nameInput.focus({ preventScroll: true });
     }, { signal });
@@ -268,20 +303,23 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
       const { target, selector } = selected;
       const matches = document.querySelectorAll(selector);
       if (matches.length !== 1 || matches[0] !== target) {
-        status.textContent = `当前页面匹配 ${matches.length} 个元素。页面已变化，请重新选取。`;
+        setStatus("pickerTargetChanged", { matches: matches.length });
         save.disabled = true;
         return;
       }
       saving = true;
       nameInput.readOnly = true;
       for (const button of [cancel, retry, save]) button.disabled = true;
-      status.textContent = "正在保存规则…";
+      setStatus("pickerSaving");
       try {
-        await saveRule(selector, nameInput.value, editing);
-        if (!signal.aborted) finish(true);
-      } catch (error) {
-        status.textContent = error instanceof Error && error.message ? error.message : "保存失败，请重试。";
-        for (const button of [cancel, retry, save]) button.disabled = false;
+        const error = await saveRule(selector, nameInput.value, editing).catch(() => "pickerSaveError" as const);
+        if (signal.aborted) return;
+        if (error) {
+          setStatus(error);
+          for (const button of [cancel, retry, save]) button.disabled = false;
+        } else {
+          finish(true);
+        }
       } finally {
         saving = false;
         nameInput.readOnly = false;
@@ -311,10 +349,20 @@ function createElementPicker(saveRule: PickerSave, resumeScan: () => void) {
     window.addEventListener("scroll", updateOutline, { capture: true, signal });
     window.addEventListener("resize", updateOutline, { signal });
 
+    localize();
     resetSelection();
     document.documentElement.append(host);
-    session = { host, controller, finish };
+    session = { host, controller, finish, localize };
   }
 
-  return { start, stop: () => session?.finish(), get active() { return Boolean(session?.host.isConnected); } };
+  return {
+    start,
+    stop: () => session?.finish(),
+    setLocale(next: ExtensionLocale) {
+      if (locale === next) return;
+      locale = next;
+      void translations?.changeLanguage(next, () => session?.localize());
+    },
+    get active() { return Boolean(session?.host.isConnected); }
+  };
 }

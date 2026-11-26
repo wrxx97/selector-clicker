@@ -4,16 +4,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { changePause, siteClickCountsKey, siteLastClickTimesKey } from "@/lib/extension";
+import { useTranslation } from "react-i18next";
+import { translate, useLanguageStore } from "@/lib/i18n";
 import { useRulesStore } from "./store";
 import type { ToastFeedback } from "@/components/ui/toast";
 import type { PauseOptions, Rule, RuleSite } from "@/lib/extension-types";
 import type { OpenManagerDialog } from "./dialogs";
 
-const count = new Intl.NumberFormat("zh-CN");
-const clickTime = new Intl.DateTimeFormat("zh-CN", {
+const timeOptions: Intl.DateTimeFormatOptions = {
   year: "numeric", month: "2-digit", day: "2-digit",
   hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
-});
+};
+const clickTime = {
+  en: new Intl.DateTimeFormat("en", timeOptions),
+  "zh-CN": new Intl.DateTimeFormat("zh-CN", timeOptions)
+};
 
 interface RuleRowProps {
   hostname: string;
@@ -30,9 +35,11 @@ function ruleStat(group: unknown, key: string) {
 }
 
 const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialog }: RuleRowProps) {
+  const { t } = useTranslation();
+  const locale = useLanguageStore((state) => state.locale);
   const conditions = [
-    rule.pathPrefix && `路径 ${rule.pathPrefix}`,
-    rule.maxClicks && `每页最多 ${rule.maxClicks} 次`
+    rule.pathPrefix && t("rulePath", { path: rule.pathPrefix }),
+    rule.maxClicks && t("ruleClickLimit", { limit: rule.maxClicks })
   ].filter(Boolean).join(" · ");
   const statsKey = `rule:${rule.id}`;
   const { loaded, clicks, clickedAt } = useRulesStore(useShallow(({ stats }) => ({
@@ -48,26 +55,26 @@ const RuleRow = memo(function RuleRow({ hostname, rule, busy, onPause, openDialo
       <code className="break-all text-xs text-muted-foreground">{rule.selector}</code>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {conditions && <span className="break-all">{conditions}</span>}
-        {loaded && <span className="tabular-nums">上次点击{" "}
+        {loaded && <span className="tabular-nums">{t("lastClick")}{" "}
           {Number.isFinite(lastClick.getTime())
-            ? <time dateTime={lastClick.toISOString()}>{clickTime.format(lastClick)}</time>
-            : "暂无记录"}
+            ? <time dateTime={lastClick.toISOString()}>{clickTime[locale].format(lastClick)}</time>
+            : t("noClicksRecorded")}
         </span>}
       </div>
     </div>
     <div className="flex flex-wrap items-center gap-0.5 sm:justify-end">
-      <Badge variant="secondary" className="mr-1 tabular-nums" title="本机累计点击次数">
-        {loaded ? `${count.format(clicks)} 次` : "—"}
+      <Badge variant="secondary" className="mr-1 tabular-nums" title={t("clicksOnDevice")}>
+        {loaded ? t("clicks", { count: clicks }) : "—"}
       </Badge>
       <Button size="sm" variant="ghost" disabled={busy}
-        aria-label={`${rule.paused ? "恢复" : "暂停"}规则 ${rule.name || rule.selector}`}
+        aria-label={t(rule.paused ? "resumeRule" : "pauseRule", { label: rule.name || rule.selector })}
         onClick={() => onPause({ selector: rule.selector, expectedId: rule.id, paused: !rule.paused })}>
-        {rule.paused ? "恢复" : "暂停"}
+        {rule.paused ? t("resume") : t("pause")}
       </Button>
-      <Button size="sm" variant="ghost" disabled={busy} aria-label={`编辑规则 ${rule.name || rule.selector}`}
-        onClick={(event) => openDialog({ kind: "rule", hostname, rule, remove: false }, event.currentTarget)}>编辑</Button>
-      <Button size="sm" variant="ghost" className="text-destructive" disabled={busy} aria-label={`移除规则 ${rule.name || rule.selector}`}
-        onClick={(event) => openDialog({ kind: "rule", hostname, rule, remove: true }, event.currentTarget)}>移除</Button>
+      <Button size="sm" variant="ghost" disabled={busy} aria-label={t("editRuleLabel", { label: rule.name || rule.selector })}
+        onClick={(event) => openDialog({ kind: "rule", hostname, rule, remove: false }, event.currentTarget)}>{t("edit")}</Button>
+      <Button size="sm" variant="ghost" className="text-destructive" disabled={busy} aria-label={t("removeRule", { label: rule.name || rule.selector })}
+        onClick={(event) => openDialog({ kind: "rule", hostname, rule, remove: true }, event.currentTarget)}>{t("remove")}</Button>
     </div>
   </li>;
 });
@@ -83,6 +90,7 @@ interface SiteGroupProps extends RulesListProps {
 }
 
 const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setFeedback }: SiteGroupProps) {
+  const { t } = useTranslation();
   const { hostname, paused } = site;
   const [busy, setBusy] = useState(false);
 
@@ -93,10 +101,10 @@ const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setF
       await changePause(hostname, options);
       await useRulesStore.getState().loadRules();
       if (options.selector === undefined) {
-        setFeedback({ text: options.paused ? "已暂停全部规则。" : "已恢复全部规则。" });
+        setFeedback({ text: translate(options.paused ? "allPaused" : "allResumed") });
       }
     } catch {
-      setFeedback({ text: "无法修改暂停状态，请重试。", error: true });
+      setFeedback({ text: translate("pauseError"), error: true });
     } finally {
       setBusy(false);
     }
@@ -106,17 +114,17 @@ const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setF
     <header className="flex flex-wrap items-center justify-between gap-2 bg-muted/70 px-4 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <h2 className="break-all text-sm font-semibold">{hostname}</h2>
-        <Badge variant="secondary">{site.rules.length} 条规则</Badge>
-        {paused && <Badge variant="outline">全部规则已暂停</Badge>}
+        <Badge variant="secondary">{t("rules", { count: site.rules.length })}</Badge>
+        {paused && <Badge variant="outline">{t("allRulesPaused")}</Badge>}
       </div>
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" variant="outline" disabled={busy} onClick={() => pause({ paused: !paused })}>
-          {paused ? "恢复站点" : "暂停站点"}
+          {paused ? t("resumeCurrentSite") : t("pauseCurrentSite")}
         </Button>
         <Button size="sm" variant="outline" disabled={busy}
-          onClick={(event) => openDialog({ kind: "site", site, remove: false }, event.currentTarget)}>编辑站点</Button>
+          onClick={(event) => openDialog({ kind: "site", site, remove: false }, event.currentTarget)}>{t("editSite")}</Button>
         <Button size="sm" variant="destructive" disabled={busy}
-          onClick={(event) => openDialog({ kind: "site", site, remove: true }, event.currentTarget)}>删除站点规则</Button>
+          onClick={(event) => openDialog({ kind: "site", site, remove: true }, event.currentTarget)}>{t("deleteSiteRules")}</Button>
       </div>
     </header>
     <ul className="divide-y border-t">
@@ -127,6 +135,7 @@ const SiteGroup = memo(function SiteGroup({ site, visibleRules, openDialog, setF
 });
 
 export const RulesList = memo(function RulesList({ openDialog, setFeedback }: RulesListProps) {
+  const { t } = useTranslation();
   const { sites, search, loadError } = useRulesStore(useShallow((state) => ({
     sites: state.sites, search: state.search, loadError: state.loadError
   })));
@@ -141,17 +150,20 @@ export const RulesList = memo(function RulesList({ openDialog, setFeedback }: Ru
 
   return <>
     <p id="rule-summary" role="status" className="text-xs text-muted-foreground">
-      {sites ? `${query ? "找到 " : ""}${groups.length} 个网站 · ${total} 条规则`
-        : loadError ? "规则暂不可用" : "正在读取规则…"}
+      {sites ? t(query ? "rulesSearchSummary" : "rulesSummary", {
+          sites: t("sites", { count: groups.length }),
+          rules: t("rules", { count: total })
+        })
+        : loadError ? t("rulesUnavailable") : t("rulesLoading")}
     </p>
-    {groups.length > 0 && <section className="grid gap-3" aria-label="站点规则">
+    {groups.length > 0 && <section className="grid gap-3" aria-label={t("siteRules")}>
       {groups.map(({ site, visibleRules }) => <SiteGroup key={site.hostname} site={site} visibleRules={visibleRules}
         setFeedback={setFeedback} openDialog={openDialog} />)}
     </section>}
     {sites && !groups.length && <Card className="gap-1.5 px-4 py-8 text-center shadow-xs">
-      <h2 className="font-semibold">{sites.length ? "没有匹配的规则" : "还没有站点规则"}</h2>
+      <h2 className="font-semibold">{sites.length ? t("noMatchingRules") : t("noSiteRules")}</h2>
       <p className="text-sm text-muted-foreground">{sites.length
-        ? "试试其他网站名称、备注或选择器。" : "在目标网页打开扩展弹窗，点击「授权并选取元素」添加第一条规则。"}</p>
+        ? t("tryAnotherSearch") : t("addFirstRule")}</p>
     </Card>}
   </>;
 });

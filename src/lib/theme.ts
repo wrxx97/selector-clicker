@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { listenToStorage } from "./extension";
 
 export const themeOptions = [
-  { id: "sky", name: "浅蓝", swatch: "linear-gradient(135deg, #c2e5ff, #397bcb)" },
-  { id: "lavender", name: "梦幻紫", swatch: "linear-gradient(135deg, #e9d6ff, #8352cb)" },
-  { id: "rose", name: "蜜桃粉", swatch: "linear-gradient(135deg, #ffd9bd, #c3448b)" },
-  { id: "amber", name: "暖橙", swatch: "linear-gradient(135deg, #ffe1a1, #c16c25)" },
-  { id: "night", name: "夜间", swatch: "linear-gradient(135deg, #506392, #101828)" }
+  { id: "sky", name: "themeSky", swatch: "linear-gradient(135deg, #c2e5ff, #397bcb)" },
+  { id: "lavender", name: "themeLavender", swatch: "linear-gradient(135deg, #e9d6ff, #8352cb)" },
+  { id: "rose", name: "themeRose", swatch: "linear-gradient(135deg, #ffd9bd, #c3448b)" },
+  { id: "amber", name: "themeAmber", swatch: "linear-gradient(135deg, #ffe1a1, #c16c25)" },
+  { id: "night", name: "themeNight", swatch: "linear-gradient(135deg, #506392, #101828)" }
 ] as const;
 
 export type ThemeId = typeof themeOptions[number]["id"];

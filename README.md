@@ -11,6 +11,12 @@
   <a href="https://wrxx97.github.io/selector-clicker/privacy/">隐私声明</a>
 </p>
 
+## 界面语言 / Interface language
+
+在规则管理页的「界面语言」中可选择跟随浏览器、简体中文或 English。语言设置随浏览器账号同步，并应用于扩展弹窗、规则管理页和网页选取器。
+
+Choose **Follow browser**, **简体中文**, or **English** under **Language** in the Rule Manager. The preference syncs through your browser account and applies to the popup, Rule Manager, and on-page picker.
+
 ## 主要特性
 
 | 特性 | 说明 |
@@ -79,9 +85,12 @@
 ```powershell
 pnpm install --frozen-lockfile
 pnpm run typecheck
+pnpm run i18n:check
 pnpm test
 pnpm run build
 ```
+
+扩展使用 i18next 和 react-i18next，词条位于 `src/i18n/locales/`。`pnpm run i18n:check` 检查漏译和占位符，发布工作流会运行同一项检查。
 
 构建后，从浏览器扩展管理页加载 `dist/`。使用 `pnpm dev` 可在编辑时自动重建，重建完成后可在浏览器里重新加载扩展。
 
@@ -98,5 +107,9 @@ pnpm run build
 本地构建后，使用以下命令将 `dist/` 打成可分发的 ZIP。
 
 ```powershell
-pnpm run package selector-clicker-1.4.1.zip
+pnpm run package selector-clicker-1.5.0.zip
 ```
+
+## 许可证 / License
+
+本项目采用 [Apache License 2.0](LICENSE)。发布 ZIP 附带项目许可证、[NOTICE](NOTICE) 和构建生成的第三方许可声明。

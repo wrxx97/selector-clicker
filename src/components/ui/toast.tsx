@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CircleAlert, Info, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./button";
 
 export interface ToastFeedback {
@@ -22,6 +23,7 @@ interface ToastProps {
 }
 
 export function Toast({ feedback, dismiss, className = "fixed inset-x-3.5 bottom-4 z-30 mx-auto" }: ToastProps) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (!feedback) return;
     const timer = window.setTimeout(() => dismiss(feedback), feedback.error ? 5500 : 3500);
@@ -38,7 +40,7 @@ export function Toast({ feedback, dismiss, className = "fixed inset-x-3.5 bottom
       <Icon size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <p className="min-w-0 flex-1 self-center" aria-hidden="true">{feedback.text}</p>
       <Button type="button" size="icon-xs" variant="ghost" className="-my-0.5"
-        aria-label="关闭提示" onClick={() => dismiss(feedback)}><X /></Button>
+        aria-label={t("dismissToast")} onClick={() => dismiss(feedback)}><X /></Button>
     </div>}
   </div>;
 }

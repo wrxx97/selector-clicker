@@ -1,9 +1,11 @@
 import { useShallow } from "zustand/react/shallow";
 import { BrandIcon } from "@/components/ui/brand-icon";
 import { Switch } from "@/components/ui/switch";
+import { useTranslation } from "react-i18next";
 import { usePopupStore } from "./store";
 
 export function PopupHeader() {
+  const { t } = useTranslation();
   const { enabled, initialized, settingsBusy, setEnabled } = usePopupStore(useShallow((state) => ({
     enabled: state.enabled, initialized: state.initialized,
     settingsBusy: state.settingsBusy, setEnabled: state.setEnabled
@@ -12,13 +14,13 @@ export function PopupHeader() {
   return <header className="flex items-center gap-3 rounded-2xl border border-border bg-linear-to-br from-banner-start to-banner-end px-3.5 py-3">
     <BrandIcon size={40} />
     <div className="min-w-0 flex-1">
-      <h1 className="text-base font-bold tracking-tight">元素自动点击</h1>
+      <h1 className="text-base font-bold tracking-tight">{t("appName")}</h1>
       <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className={`size-1.5 rounded-full ${enabled ? "bg-primary" : "bg-slate-400"}`} />
-        {initialized ? (enabled ? "已启用" : "已停用") : "正在读取…"}
+        {initialized ? (enabled ? t("enabled") : t("disabled")) : t("loading")}
       </p>
     </div>
     <Switch id="enabled" checked={enabled} onCheckedChange={setEnabled}
-      disabled={!initialized || settingsBusy} aria-label="自动点击" />
+      disabled={!initialized || settingsBusy} aria-label={t("autoClick")} />
   </header>;
 }

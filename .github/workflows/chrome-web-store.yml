@@ -83,6 +83,10 @@ jobs:
         if: steps.version.outputs.version != ''
         run: pnpm run typecheck
 
+      - name: Check translations
+        if: steps.version.outputs.version != ''
+        run: pnpm run i18n:check
+
       - name: Run tests
         if: steps.version.outputs.version != ''
         run: pnpm test

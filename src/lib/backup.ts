@@ -1,4 +1,5 @@
 import { createRuleBackup, getRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension";
+import { translate as t } from "./i18n";
 import type { ImportSite, RuleSite } from "./extension-types";
 
 export const MAX_BACKUP_BYTES = 1024 * 1024;
@@ -18,12 +19,12 @@ export async function exportRuleFile() {
 }
 
 export function validateSelector(selector: string) {
-  if (!selector.trim()) return "请输入 CSS 选择器。";
+  if (!selector.trim()) return t("selectorRequired");
   try {
     document.createDocumentFragment().querySelector(selector);
     return "";
   } catch {
-    return "CSS 选择器格式无效，请检查后重试。";
+    return t("invalidSelector");
   }
 }
 
@@ -36,21 +37,21 @@ export interface BackupPreview {
 
 export async function previewRuleImport(text: string): Promise<BackupPreview> {
   const input = text.trim();
-  if (!input) throw new Error("请输入或粘贴规则 JSON。");
-  if (new Blob([input]).size > MAX_BACKUP_BYTES) throw new Error("规则 JSON 不能超过 1 MB。");
+  if (!input) throw new Error(t("backupRequired"));
+  if (new Blob([input]).size > MAX_BACKUP_BYTES) throw new Error(t("backupTooLarge"));
   let backup: unknown;
   try {
     backup = JSON.parse(input);
   } catch {
-    throw new Error("JSON 格式无效，请检查内容是否完整。");
+    throw new Error(t("invalidJson"));
   }
   let sites: ReturnType<typeof parseRuleBackup>;
   try {
     sites = parseRuleBackup(backup, (selector) => !validateSelector(selector));
   } catch {
-    throw new Error("规则格式无效，请使用 Selector Clicker 导出的 JSON。");
+    throw new Error(t("invalidBackup"));
   }
-  const stored = await readRules().catch(() => { throw new Error("无法读取现有规则，请重试。"); });
+  const stored = await readRules().catch(() => { throw new Error(t("readRulesError")); });
   const entries = planRuleImport(stored, sites);
   return {
     backup,

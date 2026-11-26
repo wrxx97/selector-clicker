@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
+import type { TranslationKey } from "@/i18n/core";
+import { translate as t } from "@/lib/i18n";
 import type { ToastFeedback } from "@/components/ui/toast";
 import {
   AUTHORIZED_SITES_KEY, TOTAL_CLICK_COUNT_KEY, changePause, connectToPage, hasSiteAccess, isRuleChange,
@@ -36,18 +38,18 @@ interface PopupState {
   remove(rule: Rule): Promise<void>;
 }
 
-const diagnostics: Record<Exclude<RuleTestStatus, "ambiguous">, string> = {
-  ready: "匹配到一个可点击元素，已在页面高亮。",
-  missing: "当前页面没有匹配元素。",
-  removed: "这条规则已移除或修改，请重新打开弹窗。",
-  hidden: "匹配的元素不可见。",
-  disabled: "匹配的元素不可点击。",
-  cooldown: "匹配的元素仍在点击冷却中。",
-  "site-paused": "当前站点已暂停。",
-  "rule-paused": "这条规则已暂停。",
-  "out-of-scope": "当前页面路径不在规则的生效范围内。",
-  "limit-reached": "这条规则已达到本页点击上限。",
-  invalid: "CSS 选择器格式无效。"
+const diagnostics: Record<Exclude<RuleTestStatus, "ambiguous">, TranslationKey> = {
+  ready: "diagnosticReady",
+  missing: "diagnosticMissing",
+  removed: "diagnosticRemoved",
+  hidden: "diagnosticHidden",
+  disabled: "diagnosticDisabled",
+  cooldown: "diagnosticCooldown",
+  "site-paused": "diagnosticSitePaused",
+  "rule-paused": "diagnosticRulePaused",
+  "out-of-scope": "diagnosticOutOfScope",
+  "limit-reached": "diagnosticLimit",
+  invalid: "diagnosticInvalid"
 };
 
 function keepUnchangedRules(previous: Rule[], incoming: Rule[]) {
@@ -104,11 +106,11 @@ export const usePopupStore = create<PopupState>((set, get) => {
   function reportSiteStatus() {
     const { site, authorized, connected } = get();
     if (!site) {
-      set({ toast: { text: "请在普通网页上选取元素。" } });
+      set({ toast: { text: t("regularPage") } });
     } else if (!authorized) {
-      set({ toast: { text: "授权后可在当前站点选取元素和运行规则。" } });
+      set({ toast: { text: t("siteAccessNeeded") } });
     } else if (!connected) {
-      set({ toast: { text: "无法连接当前网页，请刷新后重试。", error: true } });
+      set({ toast: { text: t("connectError"), error: true } });
     }
   }
 
@@ -150,7 +152,7 @@ export const usePopupStore = create<PopupState>((set, get) => {
         if (site) await Promise.all([get().loadRules(), loadPage()]);
         if (!get().siteBusy && !get().toast) reportSiteStatus();
       } catch {
-        set({ toast: { text: "无法读取扩展状态，请重新打开弹窗。", error: true } });
+        set({ toast: { text: t("popupReadError"), error: true } });
       } finally {
         set({ initialized: true });
       }
@@ -186,32 +188,32 @@ export const usePopupStore = create<PopupState>((set, get) => {
         }
       }
     },
-    setEnabled: (enabled) => run("settings", "保存设置失败，请重试。", async () => {
+    setEnabled: (enabled) => run("settings", t("settingsSaveError"), async () => {
       await saveEnabled(enabled);
       set({ enabled });
     }),
-    scan: () => run("site", "无法扫描此页面。", async () => {
+    scan: () => run("site", t("scanError"), async () => {
       const { enabled, rules } = get();
-      if (!enabled) return "开启自动点击后即可扫描。";
-      if (!rules.length) return "当前站点还没有规则。";
-      if (rules.every((rule) => rule.paused)) return "当前站点的规则均已暂停。";
+      if (!enabled) return t("enableBeforeScan");
+      if (!rules.length) return t("noCurrentRules");
+      if (rules.every((rule) => rule.paused)) return t("allCurrentRulesPaused");
       const result = await sendToPage(requireSite(), { type: "scan-now" });
       if (!result) throw new Error("No scan response");
       set({ pageClicks: result.totalClicks });
-      return "已扫描当前页面。";
+      return t("pageScanned");
     }),
-    manage: () => run("site", "无法打开规则管理页面，请重试。", async () => {
+    manage: () => run("site", t("managerOpenError"), async () => {
       await openRules();
       window.close();
     }),
-    authorize: () => run("site", "授权当前站点失败，请重试。", async () => {
-      if (!await requestSiteAccess(requireSite().pattern)) return "未授予当前站点访问权限。";
+    authorize: () => run("site", t("authorizeError"), async () => {
+      if (!await requestSiteAccess(requireSite().pattern)) return t("accessDenied");
       await loadPage();
-      return get().connected ? "已授权当前站点。" : "已授权，请刷新当前网页后重试。";
+      return get().connected ? t("accessGranted") : t("accessGrantedRefresh");
     }),
-    pick: (rule) => run("site", "无法进入选取模式，请刷新网页后重试。", async () => {
+    pick: (rule) => run("site", t("pickerOpenError"), async () => {
       const site = requireSite();
-      if (!get().authorized && !await requestSiteAccess(site.pattern)) return "未授予当前站点访问权限。";
+      if (!get().authorized && !await requestSiteAccess(site.pattern)) return t("accessDenied");
       const status = await connectToPage(site);
       set({ authorized: true, connected: true, pageClicks: status.totalClicks });
       const editing = rule ? { selector: rule.selector, expectedId: rule.id } : {};
@@ -219,23 +221,23 @@ export const usePopupStore = create<PopupState>((set, get) => {
       if (!result?.ok) throw new Error("Could not start picker");
       window.close();
     }),
-    diagnose: (rule) => run("site", "无法测试此页面，请刷新后重试。", async () => {
+    diagnose: (rule) => run("site", t("testError"), async () => {
       const site = requireSite();
       await connectToPage(site);
       const result = await sendToPage(site, { type: "test-rule", selector: rule.selector });
       if (!result) throw new Error("No diagnostic response");
       return result.status === "ambiguous"
-        ? `匹配到 ${result.count} 个元素，请重新选取。` : diagnostics[result.status];
+        ? t("diagnosticAmbiguous", { matches: result.count ?? 0 }) : t(diagnostics[result.status]);
     }),
     pause: (options) => {
       const bulk = options.selector === undefined;
-      return run("site", "无法修改暂停状态，请重试。", async () => {
+      return run("site", t("pauseError"), async () => {
         await changePause(requireSite().hostname, options);
         await get().loadRules();
-        if (bulk) return options.paused ? "已暂停全部规则。" : "已恢复全部规则。";
+        if (bulk) return options.paused ? t("allPaused") : t("allResumed");
       });
     },
-    remove: (rule) => run("site", "移除失败，请重试。", async () => {
+    remove: (rule) => run("site", t("popupRemoveError"), async () => {
       const result = await send({ type: "remove-site-selector", hostname: requireSite().hostname, selector: rule.selector });
       if (!result?.ok) throw new Error("Could not remove rule");
       await get().loadRules();

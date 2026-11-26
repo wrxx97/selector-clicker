@@ -3,9 +3,11 @@ import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RuleList } from "./rule-list";
+import { useTranslation } from "react-i18next";
 import { usePopupStore } from "./store";
 
 function SiteControls() {
+  const { t } = useTranslation();
   const { site, initialized, authorized, busy, pick } = usePopupStore(useShallow((state) => ({
     site: state.site, initialized: state.initialized, authorized: state.authorized, busy: state.siteBusy,
     pick: state.pick
@@ -16,14 +18,14 @@ function SiteControls() {
         <Globe size={15} />
       </span>
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">当前网站</p>
+        <p className="text-xs text-muted-foreground">{t("currentSite")}</p>
         <h2 className="truncate font-bold" title={site?.hostname}>
-          {site?.hostname || (initialized ? "当前页面不可用" : "正在读取…")}
+          {site?.hostname || (initialized ? t("pageUnavailable") : t("loading"))}
         </h2>
       </div>
     </div>
     <Button id="pick-element" className="w-full" disabled={!initialized || !site || busy} onClick={() => pick()}>
-      <Crosshair /> {site && !authorized ? "授权并选取元素" : "在页面上选取元素"}
+      <Crosshair /> {site && !authorized ? t("authorizeAndPick") : t("pickOnPage")}
     </Button>
   </>;
 }

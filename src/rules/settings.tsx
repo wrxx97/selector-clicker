@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { ToastFeedback } from "@/components/ui/toast";
+import { useTranslation } from "react-i18next";
+import { translate } from "@/lib/i18n";
 import { cooldownRange, listenToStorage, normalizeCooldown, readCooldown, saveCooldown } from "@/lib/extension";
 
 const STEP_MS = 1000;
@@ -20,6 +22,7 @@ interface CooldownSettingsProps {
 }
 
 export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps) {
+  const { t } = useTranslation();
   const [saved, setSaved] = useState<number | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const lastError = useRef<ToastFeedback | null>(null);
@@ -44,7 +47,7 @@ export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps
     void readCooldown().then((value) => {
       if (active && !receivedChange) setSaved(value);
     }, () => {
-      if (active && !receivedChange) reportError("无法读取冷却设置，请重新打开此页面。");
+      if (active && !receivedChange) reportError(translate("cooldownReadError"));
     });
     return () => {
       active = false;
@@ -74,7 +77,7 @@ export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps
     const cooldown = parseCooldown(value);
     const write = () => {
       if (cooldown === null) {
-        reportError("请输入 1,000–300,000 毫秒。");
+        reportError(translate("cooldownRange"));
         return;
       }
       writes.current = writes.current.then(async () => {
@@ -83,7 +86,7 @@ export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps
         setSaved(cooldown);
         if (edit === revision.current) setDraft(null);
       }).catch(() => {
-        if (edit === revision.current) reportError("无法更新冷却时间，请重新调整后重试。");
+        if (edit === revision.current) reportError(translate("cooldownSaveError"));
       });
     };
     if (immediate) write();
@@ -100,14 +103,14 @@ export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps
     if (next !== current) update(String(next), true);
   }
 
-  return <Card aria-label="点击设置" className="gap-2 px-4 py-3 shadow-xs">
+  return <Card aria-label={t("clickSettings")} className="gap-2 px-4 py-3 shadow-xs">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="grid gap-0.5">
-        <label htmlFor="cooldown" className="font-semibold">同一元素冷却</label>
-        <p id="cooldown-description" className="text-xs text-muted-foreground">同一元素两次自动点击的最短间隔，调整后自动生效。</p>
+        <label htmlFor="cooldown" className="font-semibold">{t("cooldownTitle")}</label>
+        <p id="cooldown-description" className="text-xs text-muted-foreground">{t("cooldownDescription")}</p>
       </div>
       <div className="flex items-center gap-1.5">
-        <Button type="button" variant="outline" size="icon" className="text-primary" aria-label="减少 1 秒" title="减少 1 秒"
+        <Button type="button" variant="outline" size="icon" className="text-primary" aria-label={t("minusSecond")} title={t("minusSecond")}
           disabled={current === null || current <= cooldownRange.min} onClick={() => step(-STEP_MS)}><Minus /></Button>
         <Input id="cooldown" type="number" min={cooldownRange.min} max={cooldownRange.max} step="any"
           className="w-24 text-center tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
@@ -120,7 +123,7 @@ export function CooldownSettings({ setFeedback, dismiss }: CooldownSettingsProps
             }
             if (event.key === "Enter") flushPending();
           }} />
-        <Button type="button" variant="outline" size="icon" className="text-primary" aria-label="增加 1 秒" title="增加 1 秒"
+        <Button type="button" variant="outline" size="icon" className="text-primary" aria-label={t("plusSecond")} title={t("plusSecond")}
           disabled={current === null || current >= cooldownRange.max} onClick={() => step(STEP_MS)}><Plus /></Button>
         <span id="cooldown-unit" className="text-xs text-muted-foreground">ms</span>
       </div>

@@ -22,6 +22,7 @@ test("popup keeps rule and settings references stable on click updates and refre
   let failScan = false;
   const writes: StoredValues[] = [];
   const chromeMock = {
+    i18n: { getUILanguage: () => "zh-CN" },
     storage: {
       sync: {
         async get(defaults: StoredValues) {
