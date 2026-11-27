@@ -71,7 +71,7 @@ type SelectorUpdate =
   | { type: "remove-site-selector"; selector: string }
   | { type: "edit-site-selector"; selector: string; replacement: string; name?: string; expectedId?: string; execution?: RuntimeExecution }
   | { type: "set-rule-paused"; selector: string; expectedId: string; paused: boolean }
-  | { type: "set-site-paused"; paused: boolean };
+  | { type: "set-site-paused"; paused: boolean; includeHideRules?: boolean };
 
 function updateSiteSelectors(hostname: string, request: SelectorUpdate) {
   const { type } = request;
@@ -79,11 +79,14 @@ function updateSiteSelectors(hostname: string, request: SelectorUpdate) {
   const key = siteSelectorsKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
   const pausedKey = sitePausedKey(hostname);
+  const hideKey = siteHideRulesKey(hostname);
+  const includeHideRules = type === "set-site-paused" && request.includeHideRules;
   const update = siteRuleUpdates.then(async () => {
     const stored = await chrome.storage.sync.get({
       [key]: [],
       [detailsKey]: {},
-      [pausedKey]: false
+      [pausedKey]: false,
+      ...(includeHideRules ? { [hideKey]: [] } : {})
     });
     const current = storageStrings(stored[key]);
     const currentDetails = ruleDetails(stored[detailsKey]);
@@ -149,19 +152,65 @@ function updateSiteSelectors(hostname: string, request: SelectorUpdate) {
         break;
     }
 
+    const changes: RuntimeStored = {};
     if (next !== current || details !== currentDetails || hadLegacyPause) {
-      if (!next.length) {
+      if (!next.length && !includeHideRules) {
         await chrome.storage.sync.remove([key, detailsKey, pausedKey]);
       } else {
-        const changes: RuntimeStored = {};
         if (next !== current) changes[key] = next;
         if (details !== currentDetails) changes[detailsKey] = details;
         // Write both keys together so readers never see the legacy pause lifted before its rules are saved.
         if (hadLegacyPause) changes[pausedKey] = false;
-        await chrome.storage.sync.set(changes);
       }
     }
+    if (type === "set-site-paused" && includeHideRules) {
+      const hideRules = getSiteHideRules(stored, hostname);
+      if (hideRules.some((rule) => rule.paused !== request.paused)) {
+        changes[hideKey] = hideRules.map((rule) => ({ ...rule, paused: request.paused }));
+      }
+    }
+    if (Object.keys(changes).length) await chrome.storage.sync.set(changes);
     return { ok: true, selectors: next };
+  });
+  siteRuleUpdates = update.catch(() => {});
+  return update;
+}
+
+type HideRuleUpdate =
+  | { type: "save-hide-rule"; draft: RuntimeHideDraft }
+  | { type: "remove-hide-rule"; id: string }
+  | { type: "edit-hide-rule"; id: string; original: RuntimeHideDraft; draft: RuntimeHideDraft }
+  | { type: "set-hide-rule-paused"; id: string; paused: boolean };
+
+function updateHideRules(hostname: string, request: HideRuleUpdate) {
+  const key = siteHideRulesKey(hostname);
+  const update = siteRuleUpdates.then(async () => {
+    const stored = await chrome.storage.sync.get({ [key]: [] });
+    const rules = getSiteHideRules(stored, hostname);
+    if (request.type === "save-hide-rule") {
+      if (rules.some((rule) => sameHideTarget(rule, request.draft))) return { ok: false, reason: "duplicate" };
+      await chrome.storage.sync.set({ [key]: [...rules, { ...request.draft, id: crypto.randomUUID(), paused: false }] });
+      return { ok: true };
+    }
+    const index = rules.findIndex((rule) => rule.id === request.id);
+    if (index === -1) return { ok: false, reason: "missing" };
+    const current = rules[index];
+    if (request.type === "edit-hide-rule") {
+      const { original, draft } = request;
+      if (current.name !== original.name || !sameHideTarget(current, original)) return { ok: false, reason: "changed" };
+      if (rules.some((rule, position) => position !== index && sameHideTarget(rule, draft))) {
+        return { ok: false, reason: "duplicate" };
+      }
+      if (draft.name === current.name && sameHideTarget(current, draft)) return { ok: true };
+      rules[index] = { ...draft, id: current.id, paused: current.paused };
+    } else if (request.type === "remove-hide-rule") {
+      rules.splice(index, 1);
+    } else {
+      rules[index] = { ...current, paused: request.paused };
+    }
+    if (rules.length) await chrome.storage.sync.set({ [key]: rules });
+    else await chrome.storage.sync.remove(key);
+    return { ok: true };
   });
   siteRuleUpdates = update.catch(() => {});
   return update;
@@ -224,41 +273,61 @@ function copySiteStats(hostname: string, destination: string, rules: RuntimeRule
   return update;
 }
 
-function updateSiteGroup({ hostname, destination, expectedRuleIds, type }: {
+function isRuleIdList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((id) => typeof id === "string" && id);
+}
+
+function sameRuleIds(rules: { id: string }[], expected: string[]) {
+  return rules.length === expected.length && rules.every((rule, index) => rule.id === expected[index]);
+}
+
+function updateSiteGroup({ hostname, destination, expectedRuleIds, expectedHideRuleIds, type }: {
   hostname: string;
   destination?: unknown;
   expectedRuleIds: string[];
+  expectedHideRuleIds: string[];
   type: "rename-site" | "remove-site-rules";
 }) {
   const selectors = siteSelectorsKey(hostname);
   const details = siteRuleDetailsKey(hostname);
   const paused = sitePausedKey(hostname);
+  const hideKey = siteHideRulesKey(hostname);
   const update = siteRuleUpdates.then(async () => {
     const target = type === "rename-site" ? normalizeSiteHostname(destination) : "";
     if (type === "rename-site" && (!target || target === hostname)) return { ok: false, reason: "invalid" };
     const targetSelectors = siteSelectorsKey(target);
+    const targetHideKey = siteHideRulesKey(target);
     const stored = await chrome.storage.sync.get({
-      [selectors]: [], [details]: {}, [paused]: false, ...(target ? { [targetSelectors]: [] } : {})
+      [selectors]: [], [details]: {}, [paused]: false, [hideKey]: [],
+      ...(target ? { [targetSelectors]: [], [targetHideKey]: [] } : {})
     });
     const rules = getSiteRules(stored, hostname);
-    if (!rules.length || rules.length !== expectedRuleIds.length ||
-        rules.some((rule, index) => rule.id !== expectedRuleIds[index])) {
+    const hideRules = getSiteHideRules(stored, hostname);
+    if ((!rules.length && !hideRules.length) ||
+        !sameRuleIds(rules, expectedRuleIds) || !sameRuleIds(hideRules, expectedHideRuleIds)) {
       return { ok: false, reason: "changed" };
     }
     if (!target) {
-      await chrome.storage.sync.remove([selectors, details, paused]);
+      await chrome.storage.sync.remove([selectors, details, paused, hideKey]);
       return { ok: true };
     }
-    if (getSiteRules(stored, target).length) return { ok: false, reason: "duplicate" };
+    if (getSiteRules(stored, target).length || getSiteHideRules(stored, target).length) {
+      return { ok: false, reason: "duplicate" };
+    }
 
-    // Copy local history before publishing the move so a failed copy leaves the source rules intact.
-    await copySiteStats(hostname, target, rules);
-    await chrome.storage.sync.set({
-      [targetSelectors]: stored[selectors],
-      [siteRuleDetailsKey(target)]: stored[details],
-      [sitePausedKey(target)]: stored[paused] === true,
-      [selectors]: [], [details]: {}, [paused]: false
-    });
+    const changes: RuntimeStored = {};
+    if (rules.length) {
+      // Copy local history before publishing the move so a failed copy leaves the source rules intact.
+      await copySiteStats(hostname, target, rules);
+      Object.assign(changes, {
+        [targetSelectors]: stored[selectors],
+        [siteRuleDetailsKey(target)]: stored[details],
+        [sitePausedKey(target)]: stored[paused] === true,
+        [selectors]: [], [details]: {}, [paused]: false
+      });
+    }
+    if (hideRules.length) Object.assign(changes, { [targetHideKey]: hideRules, [hideKey]: [] });
+    await chrome.storage.sync.set(changes);
     return { ok: true };
   });
   siteRuleUpdates = update.catch(() => {});
@@ -331,15 +400,52 @@ chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) =>
     );
     return true;
   }
-  if (message.type === "rename-site" || message.type === "remove-site-rules") {
-    const { hostname, expectedRuleIds } = message;
-    if (sender.url !== chrome.runtime.getURL("rules.html") || !hostname ||
-        normalizeSiteHostname(hostname) !== hostname || !Array.isArray(expectedRuleIds) ||
-        !expectedRuleIds.every((id) => typeof id === "string" && id)) {
+  if (message.type === "save-hide-rule") {
+    const hostname = sender.tab?.id == null ? "" : getSiteHostname(sender.url);
+    const draft = getHideRuleDraft(message.rule);
+    if (!hostname || !draft) {
       sendResponse({ ok: false });
       return;
     }
-    updateSiteGroup({ type: message.type, hostname, destination: message.destination, expectedRuleIds }).then(sendResponse, () => sendResponse({ ok: false }));
+    updateHideRules(hostname, { type: message.type, draft }).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message.type === "edit-hide-rule") {
+    if (sender.url !== chrome.runtime.getURL("rules.html")) return;
+    const { hostname, id } = message;
+    const original = getHideRuleDraft(message.original);
+    const draft = getHideRuleDraft(message.rule);
+    if (typeof hostname !== "string" || !hostname || normalizeSiteHostname(hostname) !== hostname ||
+        typeof id !== "string" || !id || !original || !draft) {
+      sendResponse({ ok: false });
+      return;
+    }
+    updateHideRules(hostname, { type: message.type, id, original, draft })
+      .then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message.type === "remove-hide-rule" || message.type === "set-hide-rule-paused") {
+    if (sender.url !== chrome.runtime.getURL("popup.html") && sender.url !== chrome.runtime.getURL("rules.html")) return;
+    const { hostname, id, paused, type } = message;
+    if (typeof hostname !== "string" || !hostname || normalizeSiteHostname(hostname) !== hostname ||
+        typeof id !== "string" || !id || (type === "set-hide-rule-paused" && typeof paused !== "boolean")) {
+      sendResponse({ ok: false });
+      return;
+    }
+    const update: HideRuleUpdate = type === "remove-hide-rule" ? { type, id } : { type, id, paused: paused === true };
+    updateHideRules(hostname, update).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message.type === "rename-site" || message.type === "remove-site-rules") {
+    const { hostname, expectedRuleIds, expectedHideRuleIds = [] } = message;
+    if (sender.url !== chrome.runtime.getURL("rules.html") || !hostname ||
+        normalizeSiteHostname(hostname) !== hostname || !isRuleIdList(expectedRuleIds) || !isRuleIdList(expectedHideRuleIds)) {
+      sendResponse({ ok: false });
+      return;
+    }
+    updateSiteGroup({
+      type: message.type, hostname, destination: message.destination, expectedRuleIds, expectedHideRuleIds
+    }).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   if (message.type === "import-rules") {
@@ -373,7 +479,8 @@ chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) =>
 
   const { type: messageType, selector, expectedId } = message;
   const isPickedReplacement = messageType === "replace-picked-selector";
-  const type = isPickedReplacement ? "edit-site-selector" : messageType;
+  const isManagedPause = messageType === "set-managed-site-paused";
+  const type = isPickedReplacement ? "edit-site-selector" : isManagedPause ? "set-site-paused" : messageType;
   if (type !== "save-site-selector" && type !== "remove-site-selector" && type !== "edit-site-selector" &&
       type !== "set-rule-paused" && type !== "set-site-paused") return;
 
@@ -384,11 +491,12 @@ chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) =>
   }
   const { paused } = message;
   if (type === "set-site-paused") {
-    if (typeof paused !== "boolean") {
+    if (typeof paused !== "boolean" || (isManagedPause && sender.url !== chrome.runtime.getURL("rules.html"))) {
       sendResponse({ ok: false });
       return;
     }
-    updateSiteSelectors(hostname, { type, paused }).then(sendResponse, () => sendResponse({ ok: false }));
+    updateSiteSelectors(hostname, { type, paused, includeHideRules: isManagedPause })
+      .then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   const replacement = typeof message.replacement === "string" ? message.replacement : "";

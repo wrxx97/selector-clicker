@@ -14,12 +14,14 @@ type RuleInspection =
   const accessPattern = getSiteAccessPattern(location.href);
   const hostname = getSiteHostname(location.href);
   const siteKey = siteSelectorsKey(hostname);
+  const hideKey = siteHideRulesKey(hostname);
   const detailsKey = siteRuleDetailsKey(hostname);
   const pausedKey = sitePausedKey(hostname);
   const DEFAULTS: RuntimeStored & { enabled: boolean; cooldown: number } = {
     enabled: false,
+    hideEnabled: true,
     cooldown: 8000,
-    ...(hostname ? { [siteKey]: [], [detailsKey]: {}, [pausedKey]: false } : {})
+    ...(hostname ? { [siteKey]: [], [detailsKey]: {}, [pausedKey]: false, [hideKey]: [] } : {})
   };
 
   let config = { ...DEFAULTS };
@@ -33,13 +35,18 @@ type RuleInspection =
   const pendingSettings: RuntimeStored = {};
   let ruleHighlight: Animation | undefined;
   let siteRules: RuntimeRule[] = [];
+  let hideRules: RuntimeHideRule[] = [];
+  const hiddenElements = new Map<HTMLElement | SVGElement, { value: string; priority: string }>();
   const lastClicks = new WeakMap<Element, number>();
   const ruleClicks = new Map<string, number>();
-  const picker = createElementPicker(async (selector, name, editing) => {
+  const picker = createElementPicker(async (rule, mode, editing) => {
     if (!siteAuthorized) return "pickerAccessRevoked";
-    const message = editing
-      ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
-      : { type: "save-site-selector", selector, name };
+    const { selector, name } = rule;
+    const message = mode !== "click"
+      ? { type: "save-hide-rule", rule }
+      : editing
+        ? { type: "replace-picked-selector", selector: editing.selector, expectedId: editing.id, replacement: selector, name }
+        : { type: "save-site-selector", selector, name };
     const response: import("../lib/extension-types").WorkerResponse | undefined = await chrome.runtime.sendMessage(message);
     if (response?.ok) return;
     if (response?.reason === "missing") return "pickerRuleChanged";
@@ -59,6 +66,14 @@ type RuleInspection =
     );
   }
 
+  function getClickTarget(element: Element): Element {
+    if (element.matches("button, a[href], input, select, textarea, summary, label, [onclick]")) return element;
+    const buttons = element.querySelectorAll("button");
+    if (buttons.length === 1) return buttons[0];
+    const visible = [...buttons].filter(isVisible);
+    return visible.length === 1 ? visible[0] : element;
+  }
+
   function inspectRule(selector: string): RuleInspection {
     let matches;
     try {
@@ -68,8 +83,11 @@ type RuleInspection =
     }
     if (!matches.length) return { status: "missing" };
     if (matches.length > 1) return { status: "ambiguous", count: matches.length };
-    const [target] = matches;
-    if (!target.isConnected || !isVisible(target)) return { status: "hidden" };
+    const [selected] = matches;
+    if (!selected.isConnected || !isVisible(selected)) return { status: "hidden" };
+    if (selected.matches(":disabled, [aria-disabled='true']")) return { status: "disabled", target: selected };
+    const target = getClickTarget(selected);
+    if (target !== selected && (!target.isConnected || !isVisible(target))) return { status: "hidden" };
     if (!("click" in target) || typeof target.click !== "function" || target.matches(":disabled, [aria-disabled='true']")) {
       return { status: "disabled", target };
     }
@@ -106,8 +124,48 @@ type RuleInspection =
     return siteAuthorized && config.enabled && siteRules.some((rule) => !rule.paused);
   }
 
+  function automaticHideEnabled() {
+    return siteAuthorized && config.hideEnabled === true && hideRules.some((rule) => !rule.paused);
+  }
+
+  function isHiddenByExtension(style: CSSStyleDeclaration) {
+    return style.getPropertyValue("display") === "none" && style.getPropertyPriority("display") === "important";
+  }
+
+  function updateHiddenElements() {
+    const hiding = automaticHideEnabled();
+    if (!hiding && !hiddenElements.size) return;
+    const targets = new Set<HTMLElement | SVGElement>();
+    if (hiding) {
+      for (const rule of hideRules) {
+        if (rule.paused) continue;
+        for (const target of findHideTargets(rule)) targets.add(target);
+      }
+    }
+
+    for (const [element, previous] of hiddenElements) {
+      if (targets.has(element)) continue;
+      if (isHiddenByExtension(element.style)) {
+        if (previous.value) element.style.setProperty("display", previous.value, previous.priority);
+        else element.style.removeProperty("display");
+      }
+      hiddenElements.delete(element);
+    }
+
+    for (const element of targets) {
+      if (isHiddenByExtension(element.style)) continue;
+      hiddenElements.set(element, {
+        value: element.style.getPropertyValue("display"),
+        priority: element.style.getPropertyPriority("display")
+      });
+      element.style.setProperty("display", "none", "important");
+    }
+  }
+
   function scan() {
-    if (!automaticClickEnabled() || picker.active) return;
+    if (picker.active) return;
+    updateHiddenElements();
+    if (!automaticClickEnabled()) return;
 
     const ruleIds = [];
     for (const rule of siteRules) {
@@ -126,14 +184,14 @@ type RuleInspection =
   }
 
   function scheduleScan() {
-    if (!automaticClickEnabled() || picker.active || mutationTimer !== null) return;
+    if ((!automaticClickEnabled() && !automaticHideEnabled()) || picker.active || mutationTimer !== null) return;
     mutationTimer = window.setTimeout(() => {
       mutationTimer = null;
       scan();
     }, 100);
   }
 
-  function applyConfig(nextConfig: RuntimeStored, scanImmediately = true) {
+  function applyConfig(nextConfig: RuntimeStored, scanImmediately = true, hideOnly = false) {
     config = {
       ...DEFAULTS,
       ...nextConfig,
@@ -141,15 +199,26 @@ type RuleInspection =
     };
     const hadRules = siteRules.length > 0;
     siteRules = getSiteRules(config, hostname);
+    hideRules = getSiteHideRules(config, hostname);
+    const clicking = automaticClickEnabled();
+    const hiding = automaticHideEnabled();
 
-    if (mutationTimer !== null) window.clearTimeout(mutationTimer);
-    mutationTimer = null;
-    if (automaticClickEnabled()) {
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-      if (scanImmediately) scan();
+    if (!hideOnly || (!clicking && !hiding)) {
+      if (mutationTimer !== null) window.clearTimeout(mutationTimer);
+      mutationTimer = null;
+    }
+    if (clicking || hiding) {
+      observer.observe(document.documentElement, {
+        childList: true, subtree: true, attributes: true,
+        ...(hiding ? { characterData: true } : {})
+      });
     } else {
       observer.disconnect();
-      if (!config.enabled || !siteAuthorized || hadRules || siteRules.length) chrome.runtime.sendMessage({ type: "reset-badge" });
+    }
+    if (!hiding || (hideOnly && !picker.active)) updateHiddenElements();
+    if (scanImmediately && !hideOnly && (clicking || hiding)) scan();
+    if (!hideOnly && !clicking && (!config.enabled || !siteAuthorized || hadRules || siteRules.length)) {
+      chrome.runtime.sendMessage({ type: "reset-badge" });
     }
   }
 
@@ -203,7 +272,8 @@ type RuleInspection =
       applyConfig(changedConfig, ruleBecameRunnable);
       return;
     }
-    applyConfig(changedConfig);
+    const hideOnly = changedKeys.every((key) => key === hideKey || key === "hideEnabled");
+    applyConfig(changedConfig, true, hideOnly);
   });
 
   chrome.runtime.onMessage.addListener((payload: unknown, _sender, sendResponse) => {
@@ -235,7 +305,8 @@ type RuleInspection =
         return;
       }
       try {
-        picker.start(hostname, editing);
+        const mode = message.mode === "hide-element" || message.mode === "hide-containing" ? message.mode : "click";
+        picker.start(hostname, editing, mode);
         sendResponse({ ok: true });
       } catch {
         sendResponse({ ok: false });

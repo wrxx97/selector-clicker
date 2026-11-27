@@ -65,7 +65,9 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }: {
     const { sites } = useRulesStore.getState();
     if (!sites) return;
     try {
-      await navigator.clipboard.writeText(formatRuleBackup(sites));
+      const clickSites = sites.flatMap(({ hostname, rules }) =>
+        rules.length ? [{ hostname, rules, paused: rules.every((rule) => rule.paused) }] : []);
+      await navigator.clipboard.writeText(formatRuleBackup(clickSites));
       setFeedback({ text: t("rulesCopied") });
     } catch {
       setFeedback({ text: t("copyRulesError"), error: true });
@@ -166,7 +168,7 @@ function RuleManager() {
     </section>
     <RulesList openDialog={openDialog} setFeedback={setFeedback} />
     <RulesLoadFeedback setFeedback={setFeedback} />
-    {dialog?.kind === "rule" && <EditorDialog action={dialog} {...dialogProps} />}
+    {(dialog?.kind === "rule" || dialog?.kind === "hide-rule") && <EditorDialog action={dialog} {...dialogProps} />}
     {dialog?.kind === "site" && <SiteDialog action={dialog} {...dialogProps} />}
     {dialog?.kind === "backup" && <BackupDialog source={dialog.source} {...dialogProps} />}
     <Toast feedback={feedback} dismiss={dismiss} />

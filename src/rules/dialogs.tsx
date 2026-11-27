@@ -7,13 +7,14 @@ import { Toast, useToast, type ToastFeedback } from "@/components/ui/toast";
 import { previewRuleImport, validateSelector, type BackupPreview } from "@/lib/backup";
 import { RULE_NAME_MAX_LENGTH, getExecutionOptions, normalizeSiteHostname, send } from "@/lib/extension";
 import { useTranslation } from "react-i18next";
-import type { Rule, RuleSite, WorkerRequest } from "@/lib/extension-types";
+import type { HideRule, ManagedRuleSite, Rule, WorkerRequest } from "@/lib/extension-types";
 
 type RuleAction = { kind: "rule"; hostname: string; rule: Rule; remove: boolean };
-type SiteAction = { kind: "site"; site: RuleSite; remove: boolean };
+type HideRuleAction = { kind: "hide-rule"; hostname: string; rule: HideRule; remove: boolean };
+type SiteAction = { kind: "site"; site: ManagedRuleSite; remove: boolean };
 type BackupSource = { type: "text"; preview?: never } | { type: "file"; preview: BackupPreview };
 
-export type ManagerDialog = RuleAction | SiteAction | { kind: "backup"; source: BackupSource };
+export type ManagerDialog = RuleAction | HideRuleAction | SiteAction | { kind: "backup"; source: BackupSource };
 export type OpenManagerDialog = (dialog: ManagerDialog, trigger: HTMLElement | null) => void;
 
 interface DialogCallbacks {
@@ -36,11 +37,15 @@ function RuleDialogContent({ children, feedback, dismiss, ...props }: RuleDialog
   </DialogContent>;
 }
 
-export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCallbacks & { action: RuleAction }) {
+export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCallbacks & { action: RuleAction | HideRuleAction }) {
   const { t } = useTranslation();
   const { hostname, rule, remove } = action;
+  const condition = action.kind === "hide-rule" ? action.rule.contains : undefined;
   const [draft, setDraft] = useState({
-    name: rule.name, selector: rule.selector, path: rule.pathPrefix, limit: rule.maxClicks || ""
+    name: rule.name, selector: rule.selector,
+    path: "pathPrefix" in rule ? rule.pathPrefix : "",
+    limit: "maxClicks" in rule ? rule.maxClicks || "" : "",
+    markerSelector: condition?.selector ?? "", markerText: condition?.text ?? ""
   });
   const { feedback, setFeedback, dismiss } = useToast();
   const reportError = (text: string) => setFeedback({ text, error: true });
@@ -56,16 +61,32 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCa
     event.preventDefault();
     if (saving) return;
     const target = { hostname, selector: rule.selector, expectedId: rule.id };
-    let message: WorkerRequest = { type: "remove-site-selector", ...target };
+    let message: WorkerRequest = action.kind === "hide-rule"
+      ? { type: "remove-hide-rule", hostname, id: rule.id }
+      : { type: "remove-site-selector", ...target };
     if (!remove) {
-      const execution = event.currentTarget.checkValidity()
-        ? getExecutionOptions(draft.path, Number(draft.limit)) : null;
-      const invalid = validateSelector(draft.selector);
-      if (invalid || !execution) {
-        reportError(invalid || t("invalidExecution"));
+      const invalid = validateSelector(draft.selector) || (condition ? validateSelector(draft.markerSelector) : "");
+      if (invalid) {
+        reportError(invalid);
         return;
       }
-      message = { type: "edit-site-selector", ...target, replacement: draft.selector, name: draft.name, ...execution };
+      if (action.kind === "hide-rule") {
+        message = {
+          type: "edit-hide-rule", hostname, id: rule.id, original: rule,
+          rule: {
+            selector: draft.selector, name: draft.name,
+            ...(condition ? { contains: { selector: draft.markerSelector, text: draft.markerText } } : {})
+          }
+        };
+      } else {
+        const execution = event.currentTarget.checkValidity()
+          ? getExecutionOptions(draft.path, Number(draft.limit)) : null;
+        if (!execution) {
+          reportError(t("invalidExecution"));
+          return;
+        }
+        message = { type: "edit-site-selector", ...target, replacement: draft.selector, name: draft.name, ...execution };
+      }
     }
     setSaving(true);
     setFeedback(null);
@@ -73,7 +94,10 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCa
     try {
       const result = await send(message);
       if (!result?.ok) {
-        const errors: Record<string, string> = { duplicate: t("selectorDuplicate"), missing: t("ruleChanged") };
+        const errors: Record<string, string> = {
+          duplicate: t(action.kind === "hide-rule" ? "hideRuleDuplicate" : "selectorDuplicate"),
+          missing: t("ruleChanged"), changed: t("ruleChanged")
+        };
         reportError(errors[result?.reason ?? ""] || failure);
         return;
       }
@@ -96,7 +120,11 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCa
         <DialogDescription>{hostname}{remove && rule.name ? ` · ${rule.name}` : ""}</DialogDescription>
       </DialogHeader>
       <form id="rule-form" className="grid gap-3" onSubmit={submit} noValidate>
-        {remove ? <code className="break-all rounded-lg bg-muted p-3 text-xs">{rule.selector}</code> : <>
+        {remove ? <code className="break-all whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs">
+          {rule.selector}
+          {action.kind === "hide-rule" && action.rule.contains &&
+            `\n↳ ${action.rule.contains.selector}${action.rule.contains.text ? ` · “${action.rule.contains.text}”` : ""}`}
+        </code> : <>
           <label className="grid gap-1.5">
             {t("ruleNameOptional")}
             <Input ref={nameInput} id="name-input" value={draft.name} maxLength={RULE_NAME_MAX_LENGTH}
@@ -107,16 +135,30 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCa
             <Textarea id="selector-input" className="font-mono" value={draft.selector} rows={3} spellCheck={false}
               onChange={update("selector")} readOnly={saving} />
           </label>
-          <label className="grid gap-1.5">
-            {t("pathOptional")}
-            <Input id="path-prefix" value={draft.path} onChange={update("path")} readOnly={saving}
-              placeholder={t("pathPlaceholder")} spellCheck={false} />
-          </label>
-          <label className="grid gap-1.5">
-            {t("clickLimit")}
-            <Input id="max-clicks" type="number" min="0" step="1" value={draft.limit} onChange={update("limit")}
-              readOnly={saving} placeholder={t("limitPlaceholder")} />
-          </label>
+          {condition && <>
+            <label className="grid gap-1.5">
+              {t("hideMarkerSelector")}
+              <Input id="hide-marker-selector" className="font-mono" value={draft.markerSelector} spellCheck={false}
+                onChange={update("markerSelector")} readOnly={saving} />
+            </label>
+            <label className="grid gap-1.5">
+              {t("hideMarkerText")}
+              <Input id="hide-marker-text" value={draft.markerText} maxLength={RULE_NAME_MAX_LENGTH}
+                onChange={update("markerText")} readOnly={saving} placeholder={t("hideMarkerTextPlaceholder")} />
+            </label>
+          </>}
+          {action.kind === "rule" && <>
+            <label className="grid gap-1.5">
+              {t("pathOptional")}
+              <Input id="path-prefix" value={draft.path} onChange={update("path")} readOnly={saving}
+                placeholder={t("pathPlaceholder")} spellCheck={false} />
+            </label>
+            <label className="grid gap-1.5">
+              {t("clickLimit")}
+              <Input id="max-clicks" type="number" min="0" step="1" value={draft.limit} onChange={update("limit")}
+                readOnly={saving} placeholder={t("limitPlaceholder")} />
+            </label>
+          </>}
         </>}
         <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
           <Button ref={cancelButton} type="button" variant="outline" disabled={saving} onClick={onClose}>{t("cancel")}</Button>
@@ -132,7 +174,8 @@ export function EditorDialog({ action, onClose, onSaved, returnFocus }: DialogCa
 export function SiteDialog({ action, onClose, onSaved, returnFocus }: DialogCallbacks & { action: SiteAction }) {
   const { t } = useTranslation();
   const { site, remove } = action;
-  const { hostname, rules } = site;
+  const { hostname, rules, hideRules } = site;
+  const ruleCount = rules.length + hideRules.length;
   const [destination, setDestination] = useState(hostname);
   const [saving, setSaving] = useState(false);
   const { feedback, setFeedback, dismiss } = useToast();
@@ -151,7 +194,9 @@ export function SiteDialog({ action, onClose, onSaved, returnFocus }: DialogCall
     setFeedback(null);
     const failure = remove ? t("deleteSiteError") : t("editSiteError");
     try {
-      const request = { hostname, expectedRuleIds: rules.map((rule) => rule.id) };
+      const request = {
+        hostname, expectedRuleIds: rules.map((rule) => rule.id), expectedHideRuleIds: hideRules.map((rule) => rule.id)
+      };
       const result = await send(remove
         ? { ...request, type: "remove-site-rules" }
         : { ...request, type: "rename-site", destination: target });
@@ -177,8 +222,8 @@ export function SiteDialog({ action, onClose, onSaved, returnFocus }: DialogCall
       <DialogHeader>
         <DialogTitle>{remove ? t("deleteSiteConfirm") : t("editSite")}</DialogTitle>
         <DialogDescription>{remove
-          ? t("deleteSiteDescription", { hostname, rules: t("rules", { count: rules.length }) })
-          : t("editSiteDescription", { hostname, rules: t("rules", { count: rules.length }) })}</DialogDescription>
+          ? t("deleteSiteDescription", { hostname, rules: t("rules", { count: ruleCount }) })
+          : t("editSiteDescription", { hostname, rules: t("rules", { count: ruleCount }) })}</DialogDescription>
       </DialogHeader>
       <form id="site-form" className="grid gap-3" onSubmit={submit}>
         {!remove && <label className="grid gap-1.5">

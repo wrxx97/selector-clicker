@@ -1,4 +1,7 @@
 type RuntimeRule = import("../lib/extension-types").Rule;
+type RuntimeHideRule = import("../lib/extension-types").HideRule;
+type RuntimeHideDraft = import("../lib/extension-types").HideRuleDraft;
+type RuntimeManagedRuleSite = import("../lib/extension-types").ManagedRuleSite;
 type RuntimeRuleSite = import("../lib/extension-types").RuleSite;
 type RuntimeStored = import("../lib/extension-types").StoredValues;
 type RuntimeBackup = import("../lib/extension-types").RuleBackup;
@@ -21,6 +24,7 @@ function ruleDetails(value: unknown): RuntimeRuleDetails {
 
 // These shared scripts can be injected twice when a tab finishes loading during authorization.
 var SITE_SELECTORS_PREFIX = "siteSelectors:";
+var SITE_HIDE_RULES_PREFIX = "siteHideRules:";
 var SITE_RULE_DETAILS_PREFIX = "siteRuleDetails:";
 var SITE_PAUSED_PREFIX = "sitePaused:";
 var SITE_CLICK_COUNTS_PREFIX = "siteClickCounts:";
@@ -58,6 +62,59 @@ function getSiteAccessPattern(url: unknown) {
 
 function siteSelectorsKey(hostname: string) {
   return SITE_SELECTORS_PREFIX + hostname;
+}
+
+function siteHideRulesKey(hostname: string) {
+  return SITE_HIDE_RULES_PREFIX + hostname;
+}
+
+function normalizeHideText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getHideRuleDraft(value: unknown): RuntimeHideDraft | null {
+  const { selector, name, contains } = recordValues(value);
+  if (typeof selector !== "string" || !selector.trim() || typeof name !== "string") return null;
+  const rule: RuntimeHideDraft = { selector: selector.trim(), name: name.trim().slice(0, RULE_NAME_MAX_LENGTH) };
+  if (contains !== undefined) {
+    const condition = recordValues(contains);
+    if (typeof condition.selector !== "string" || !condition.selector.trim() || typeof condition.text !== "string" ||
+        condition.text.length > RULE_NAME_MAX_LENGTH) return null;
+    rule.contains = { selector: condition.selector.trim(), text: normalizeHideText(condition.text) };
+  }
+  return rule;
+}
+
+function getSiteHideRules(stored: RuntimeStored, hostname: string): RuntimeHideRule[] {
+  const value = stored[siteHideRulesKey(hostname)];
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const { id, paused } = recordValues(entry);
+    const draft = getHideRuleDraft(entry);
+    return draft && typeof id === "string" && id && typeof paused === "boolean" ? [{ ...draft, id, paused }] : [];
+  });
+}
+
+function sameHideTarget(first: RuntimeHideDraft, second: RuntimeHideDraft) {
+  return first.selector === second.selector && first.contains?.selector === second.contains?.selector &&
+    first.contains?.text === second.contains?.text;
+}
+
+function canHideElement(element: Element): element is HTMLElement | SVGElement {
+  return element.isConnected && "style" in element &&
+    !element.matches("html, body, frame, selector-clicker-picker");
+}
+
+function findHideTargets({ selector, contains }: RuntimeHideDraft, root: ParentNode = document) {
+  try {
+    const targets = [...root.querySelectorAll(selector)];
+    if (!contains) return targets.length === 1 ? targets.filter(canHideElement) : [];
+    return targets.filter(canHideElement).filter((target) =>
+      [...target.querySelectorAll(contains.selector)].some((marker) =>
+        !contains.text || normalizeHideText(marker.textContent ?? "") === contains.text));
+  } catch {
+    return [];
+  }
 }
 
 function siteRuleDetailsKey(hostname: string) {
@@ -110,6 +167,23 @@ function getRuleSites(stored: RuntimeStored): RuntimeRuleSite[] {
     if (hostname && rules.length) sites.push({ hostname, rules, paused: rules.every((rule) => rule.paused) });
   }
   return sites.sort((first, second) => first.hostname.localeCompare(second.hostname));
+}
+
+function getManagedRuleSites(stored: RuntimeStored): RuntimeManagedRuleSite[] {
+  const sites = new Map(getRuleSites(stored).map((site): [string, RuntimeManagedRuleSite] =>
+    [site.hostname, { ...site, hideRules: [] }]));
+  for (const key of Object.keys(stored)) {
+    if (!key.startsWith(SITE_HIDE_RULES_PREFIX)) continue;
+    const hostname = key.slice(SITE_HIDE_RULES_PREFIX.length);
+    const hideRules = getSiteHideRules(stored, hostname);
+    if (!hostname || !hideRules.length) continue;
+    const site = sites.get(hostname);
+    sites.set(hostname, {
+      hostname, rules: site?.rules ?? [], hideRules,
+      paused: (site?.paused ?? true) && hideRules.every((rule) => rule.paused)
+    });
+  }
+  return [...sites.values()].sort((first, second) => first.hostname.localeCompare(second.hostname));
 }
 
 function createRuleBackup(ruleSites: RuntimeRuleSite[]): RuntimeBackup {

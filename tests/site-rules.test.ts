@@ -3,7 +3,7 @@ import { compileRuntimeScript, type RuntimeScript } from "../src/build/runtime-s
 import crypto from "node:crypto";
 import test from "node:test";
 import vm from "node:vm";
-import type { Rule, RuleBackup, StorageChanges, StoredValues, WorkerResponse } from "../src/lib/extension-types";
+import type { HideRule, Rule, RuleBackup, StorageChanges, StoredValues, WorkerResponse } from "../src/lib/extension-types";
 
 type WorkerMessage = { type: string; [key: string]: unknown };
 type WorkerSender = { url?: string; tab?: { id: number } };
@@ -179,6 +179,86 @@ test("concurrent saves keep both rules and deduplicate a selector on the same ho
 
   assert.deepEqual([...worker.store.read<string[]>("siteSelectors:example.com")], ["#ad-close", "#dialog-close"]);
   assert.deepEqual([...worker.store.read<string[]>("siteSelectors:sub.example.com")], ["#ad-close"]);
+});
+
+test("stores, deduplicates, pauses and removes hide rules separately from click rules", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const page = { url: `https://${hostname}/`, tab: { id: 1 } };
+  const popup = { url: "chrome-extension://test/popup.html" };
+  const key = `siteHideRules:${hostname}`;
+  const save = (rule: unknown) => worker.send({ type: "save-hide-rule", rule }, page);
+  const sameCard = { selector: ".card", name: "Card", contains: { selector: ".tag", text: " Ad " } };
+  const saved = await Promise.all([
+    save({ selector: "#notice", name: "Notice" }), save(sameCard), save({ ...sameCard, name: "Duplicate" })
+  ]);
+  assert.deepEqual(saved, [{ ok: true }, { ok: true }, { ok: false, reason: "duplicate" }]);
+  assert.deepEqual(await save({ ...sameCard, contains: { selector: ".tag" } }), { ok: false });
+  await worker.send({ type: "save-site-selector", selector: "#notice" }, page);
+
+  const rules = worker.store.read<HideRule[]>(key);
+  assert.deepEqual(structuredClone(rules.map(({ selector, contains }) => [selector, contains?.text])),
+    [["#notice", undefined], [".card", "Ad"]]);
+  const id = rules[0].id;
+  assert.deepEqual(await worker.send({ type: "set-hide-rule-paused", hostname, id, paused: true }, popup), { ok: true });
+  assert.equal(worker.store.read<HideRule[]>(key)[0].paused, true);
+  assert.deepEqual(await worker.send({ type: "remove-hide-rule", hostname, id }, popup), { ok: true });
+  assert.equal(worker.store.read<HideRule[]>(key).length, 1);
+  assert.deepEqual(structuredClone(worker.store.read<string[]>(`siteSelectors:${hostname}`)), ["#notice"]);
+});
+
+test("editing a hide rule preserves its identity and current pause and rejects duplicate or stale edits", async () => {
+  const worker = createWorker();
+  const hostname = "example.com";
+  const key = "siteHideRules:example.com";
+  const settings = { url: "chrome-extension://test/rules.html" };
+  const sender = { url: "https://example.com/", tab: { id: 1 } };
+  const original = { selector: ".card", name: "Ad", contains: { selector: ".badge", text: "Ad" } };
+  const other = { selector: "#banner", name: "Banner" };
+  await worker.send({ type: "save-hide-rule", rule: original }, sender);
+  await worker.send({ type: "save-hide-rule", rule: other }, sender);
+  const id = worker.store.read<HideRule[]>(key)[0].id;
+  const request = { type: "edit-hide-rule", hostname, id, original };
+  assert.deepEqual(await worker.send({ ...request, rule: other }, settings), { ok: false, reason: "duplicate" });
+  await worker.send({ type: "set-hide-rule-paused", hostname, id, paused: true }, settings);
+  const changed = { selector: ".result", name: "Promoted", contains: { selector: ".sponsored", text: "  Partner  " } };
+  assert.deepEqual(await worker.send({ ...request, rule: changed }, settings), { ok: true });
+  const saved = structuredClone(worker.store.read<HideRule[]>(key)[0]);
+  assert.deepEqual(saved, { ...changed, contains: { selector: ".sponsored", text: "Partner" }, id, paused: true });
+  assert.deepEqual(await worker.send({ ...request, rule: other }, settings), { ok: false, reason: "changed" });
+  await worker.send({ type: "remove-hide-rule", hostname, id }, settings);
+  assert.deepEqual(await worker.send({ ...request, original: saved, rule: changed }, settings), { ok: false, reason: "missing" });
+});
+
+
+test("settings can pause, move, and delete a site's click and hide rules together", async () => {
+  const worker = createWorker();
+  const hostname = "source.example";
+  const destination = "target.example";
+  const page = { url: `https://${hostname}/`, tab: { id: 1 } };
+  const settings = { url: "chrome-extension://test/rules.html" };
+  await worker.send({ type: "save-hide-rule", rule: { selector: ".ad", name: "Ad" } }, page);
+  await worker.send({ type: "save-site-selector", selector: "#close" }, page);
+  const hiddenKey = `siteHideRules:${hostname}`;
+  const hideId = worker.store.read<HideRule[]>(hiddenKey)[0].id;
+  const clickId = worker.store.read<SavedRuleDetails>(`siteRuleDetails:${hostname}`)["selector:#close"].id;
+  assert.equal((await worker.send({ type: "set-site-paused", hostname, paused: true }, settings)).ok, true);
+  assert.equal(worker.store.read<HideRule[]>(hiddenKey)[0].paused, false);
+  assert.equal((await worker.send({ type: "set-managed-site-paused", hostname, paused: true }, settings)).ok, true);
+  assert.equal(worker.store.read<HideRule[]>(hiddenKey)[0].paused, true);
+  assert.equal((await worker.send({ type: "set-managed-site-paused", hostname, paused: false }, settings)).ok, true);
+  assert.equal(worker.store.read<HideRule[]>(hiddenKey)[0].paused, false);
+  assert.equal(worker.store.read<SavedRuleDetails>(`siteRuleDetails:${hostname}`)["selector:#close"].paused, false);
+
+  const group = { hostname, expectedRuleIds: [clickId], expectedHideRuleIds: [hideId] };
+  assert.deepEqual(await worker.send({ ...group, expectedHideRuleIds: [], type: "remove-site-rules" }, settings),
+    { ok: false, reason: "changed" });
+  assert.deepEqual(await worker.send({ ...group, destination, type: "rename-site" }, settings), { ok: true });
+  assert.equal(worker.store.read<HideRule[]>(`siteHideRules:${destination}`)[0].id, hideId);
+  assert.equal(worker.store.read<HideRule[]>(hiddenKey).length, 0);
+  assert.deepEqual(await worker.send({ ...group, hostname: destination, type: "remove-site-rules" }, settings), { ok: true });
+  assert.equal(worker.store.has(`siteHideRules:${destination}`), false);
+  assert.equal(worker.store.has(`siteSelectors:${destination}`), false);
 });
 
 test("removing the last rule only removes that hostname's storage key", async () => {

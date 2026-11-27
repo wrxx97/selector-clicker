@@ -14,7 +14,10 @@ test("rules store preserves unaffected groups and rows and consumes click update
   const saved = {
     "siteSelectors:first.example": ["#one", "#two"],
     "siteSelectors:second.example": ["#three"],
-    "siteRuleDetails:first.example": { "selector:#one": { id: "one", name: "Original" } }
+    "siteRuleDetails:first.example": { "selector:#one": { id: "one", name: "Original" } },
+    "siteHideRules:third.example": [{
+      id: "hide-ad", selector: ".card", name: "Hide ad", paused: false, contains: { selector: ".ad", text: "Ad" }
+    }]
   };
   const chromeMock = {
     storage: {
@@ -37,6 +40,8 @@ test("rules store preserves unaffected groups and rows and consumes click update
       const groups = state().sites;
       assert.ok(groups);
       assert.ok(storageListener);
+      assert.equal(groups[2].hostname, "third.example");
+      assert.equal(groups[2].hideRules[0].contains?.text, "Ad");
       storageListener({ totalClickCount: { newValue: 5 } }, "local");
       finishStats({ totalClickCount: 4 });
       await tick();
@@ -56,6 +61,12 @@ test("rules store preserves unaffected groups and rows and consumes click update
       assert.equal(updated[1], groups[1]);
       await state().loadRules();
       assert.equal(state().sites, updated);
+      saved["siteHideRules:third.example"][0].paused = true;
+      storageListener({ "siteHideRules:third.example": { newValue: saved["siteHideRules:third.example"] } }, "sync");
+      await tick();
+      assert.equal(state().sites?.[0], updated[0]);
+      assert.equal(state().sites?.[2].paused, true);
+      assert.equal(state().sites?.[2].hideRules[0].paused, true);
     } finally {
       stop();
     }

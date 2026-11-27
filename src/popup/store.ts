@@ -5,10 +5,11 @@ import { translate as t } from "@/lib/i18n";
 import type { ToastFeedback } from "@/components/ui/toast";
 import {
   AUTHORIZED_SITES_KEY, TOTAL_CLICK_COUNT_KEY, changePause, connectToPage, hasSiteAccess, isRuleChange,
-  listenToStorage, openRules, readActiveSite, readEnabled, readSiteRules, requestSiteAccess, saveEnabled,
+  isHideRuleChange, listenToStorage, openRules, readActiveSite, readEnabled, readSiteHideRules, readSiteRules,
+  requestSiteAccess, saveEnabled,
   send, sendToPage
 } from "@/lib/extension";
-import type { ActiveSite, PauseOptions, Rule, RuleTestStatus, StorageChanges } from "@/lib/extension-types";
+import type { ActiveSite, HideRule, PauseOptions, PickerMode, Rule, RuleTestStatus, StorageChanges } from "@/lib/extension-types";
 
 type Operation = "site" | "settings";
 
@@ -16,7 +17,9 @@ interface PopupState {
   site: ActiveSite | null;
   initialized: boolean;
   enabled: boolean;
+  hideEnabled: boolean;
   rules: Rule[];
+  hideRules: HideRule[];
   authorized: boolean;
   connected: boolean;
   pageClicks: number | null;
@@ -27,12 +30,16 @@ interface PopupState {
   dismissToast(feedback: ToastFeedback): void;
   initialize(): Promise<void>;
   loadRules(): Promise<void>;
+  loadHideRules(): Promise<void>;
   storageChanged(changes: StorageChanges, area: string): void;
   setEnabled(enabled: boolean): Promise<void>;
+  setHideEnabled(enabled: boolean): Promise<void>;
   scan(): Promise<void>;
   manage(): Promise<void>;
   authorize(): Promise<void>;
-  pick(rule?: Rule): Promise<void>;
+  pick(rule?: Rule, mode?: PickerMode): Promise<void>;
+  pauseHideRule(rule: HideRule): Promise<void>;
+  removeHideRule(rule: HideRule): Promise<void>;
   diagnose(rule: Rule): Promise<void>;
   pause(options: PauseOptions): Promise<void>;
   remove(rule: Rule): Promise<void>;
@@ -64,6 +71,7 @@ function keepUnchangedRules(previous: Rule[], incoming: Rule[]) {
 
 export const usePopupStore = create<PopupState>((set, get) => {
   let rulesRequest = 0;
+  let hideRulesRequest = 0;
   let pageRequest = 0;
   let clicksRequest = 0;
 
@@ -133,7 +141,9 @@ export const usePopupStore = create<PopupState>((set, get) => {
     site: null,
     initialized: false,
     enabled: false,
+    hideEnabled: true,
     rules: [],
+    hideRules: [],
     authorized: false,
     connected: false,
     pageClicks: null,
@@ -147,9 +157,11 @@ export const usePopupStore = create<PopupState>((set, get) => {
         set({ totalClicks: Number(stored[TOTAL_CLICK_COUNT_KEY]) || 0 });
       }).catch(() => {});
       try {
-        const [enabled, site] = await Promise.all([readEnabled(), readActiveSite()]);
-        set({ site, enabled });
-        if (site) await Promise.all([get().loadRules(), loadPage()]);
+        const [enabled, site, hiding] = await Promise.all([
+          readEnabled(), readActiveSite(), chrome.storage.sync.get({ hideEnabled: true })
+        ]);
+        set({ site, enabled, hideEnabled: hiding.hideEnabled === true });
+        if (site) await Promise.all([get().loadRules(), get().loadHideRules(), loadPage()]);
         if (!get().siteBusy && !get().toast) reportSiteStatus();
       } catch {
         set({ toast: { text: t("popupReadError"), error: true } });
@@ -167,11 +179,20 @@ export const usePopupStore = create<PopupState>((set, get) => {
         return rules === state.rules ? state : { rules };
       });
     },
+    async loadHideRules() {
+      const { site } = get();
+      if (!site) return;
+      const request = ++hideRulesRequest;
+      const hideRules = await readSiteHideRules(site.hostname);
+      if (request === hideRulesRequest) set({ hideRules });
+    },
     storageChanged(changes, area) {
       if (area === "sync") {
         const { site } = get();
         if (site && isRuleChange(changes, site.hostname)) void get().loadRules().catch(() => {});
+        if (site && isHideRuleChange(changes, site.hostname)) void get().loadHideRules().catch(() => {});
         if (changes.enabled) set({ enabled: changes.enabled.newValue === true });
+        if (changes.hideEnabled) set({ hideEnabled: (changes.hideEnabled.newValue ?? true) === true });
       }
       if (area === "local") {
         if (changes[TOTAL_CLICK_COUNT_KEY]) {
@@ -192,6 +213,10 @@ export const usePopupStore = create<PopupState>((set, get) => {
       await saveEnabled(enabled);
       set({ enabled });
     }),
+    setHideEnabled: (hideEnabled) => run("settings", t("settingsSaveError"), async () => {
+      await chrome.storage.sync.set({ hideEnabled });
+      set({ hideEnabled });
+    }),
     scan: () => run("site", t("scanError"), async () => {
       const { enabled, rules } = get();
       if (!enabled) return t("enableBeforeScan");
@@ -211,15 +236,27 @@ export const usePopupStore = create<PopupState>((set, get) => {
       await loadPage();
       return get().connected ? t("accessGranted") : t("accessGrantedRefresh");
     }),
-    pick: (rule) => run("site", t("pickerOpenError"), async () => {
+    pick: (rule, mode = "click") => run("site", t("pickerOpenError"), async () => {
       const site = requireSite();
       if (!get().authorized && !await requestSiteAccess(site.pattern)) return t("accessDenied");
       const status = await connectToPage(site);
       set({ authorized: true, connected: true, pageClicks: status.totalClicks });
       const editing = rule ? { selector: rule.selector, expectedId: rule.id } : {};
-      const result = await sendToPage(site, { type: "start-picker", ...editing });
+      const result = await sendToPage(site, { type: "start-picker", ...editing, mode });
       if (!result?.ok) throw new Error("Could not start picker");
       window.close();
+    }),
+    pauseHideRule: (rule) => run("site", t("pauseError"), async () => {
+      const result = await send({
+        type: "set-hide-rule-paused", hostname: requireSite().hostname, id: rule.id, paused: !rule.paused
+      });
+      if (!result?.ok) throw new Error("Could not update hide rule");
+      await get().loadHideRules();
+    }),
+    removeHideRule: (rule) => run("site", t("popupRemoveError"), async () => {
+      const result = await send({ type: "remove-hide-rule", hostname: requireSite().hostname, id: rule.id });
+      if (!result?.ok) throw new Error("Could not remove hide rule");
+      await get().loadHideRules();
     }),
     diagnose: (rule) => run("site", t("testError"), async () => {
       const site = requireSite();

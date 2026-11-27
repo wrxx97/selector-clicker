@@ -7,10 +7,32 @@ export interface Rule {
   maxClicks: number;
 }
 
+export interface HideCondition {
+  selector: string;
+  text: string;
+}
+
+export interface HideRuleDraft {
+  selector: string;
+  name: string;
+  contains?: HideCondition;
+}
+
+export interface HideRule extends HideRuleDraft {
+  id: string;
+  paused: boolean;
+}
+
+export type PickerMode = "click" | "hide-element" | "hide-containing";
+
 export interface RuleSite {
   hostname: string;
   paused: boolean;
   rules: Rule[];
+}
+
+export interface ManagedRuleSite extends RuleSite {
+  hideRules: HideRule[];
 }
 
 export interface ActiveSite {
@@ -41,7 +63,7 @@ export type RuleTestStatus =
 export type PageRequest =
   | { type: "get-status" | "scan-now" }
   | { type: "test-rule"; selector: string }
-  | { type: "start-picker"; selector?: string; expectedId?: string };
+  | { type: "start-picker"; selector?: string; expectedId?: string; mode?: PickerMode };
 
 export interface PageResponses {
   "get-status": { authorized: boolean; enabled: boolean; totalClicks: number };
@@ -53,12 +75,16 @@ export interface PageResponses {
 export type WorkerRequest =
   | { type: "authorize-site"; pattern: string }
   | { type: "set-site-paused"; hostname: string; paused: boolean }
-  | { type: "rename-site"; hostname: string; destination: string; expectedRuleIds: string[] }
-  | { type: "remove-site-rules"; hostname: string; expectedRuleIds: string[] }
+  | { type: "set-managed-site-paused"; hostname: string; paused: boolean }
+  | { type: "rename-site"; hostname: string; destination: string; expectedRuleIds: string[]; expectedHideRuleIds?: string[] }
+  | { type: "remove-site-rules"; hostname: string; expectedRuleIds: string[]; expectedHideRuleIds?: string[] }
   | { type: "set-rule-paused"; hostname: string; selector: string; expectedId: string; paused: boolean }
   | { type: "remove-site-selector"; hostname: string; selector: string; expectedId?: string }
   | { type: "edit-site-selector"; hostname: string; selector: string; expectedId: string; replacement: string; name: string; pathPrefix: string; maxClicks: number }
-  | { type: "import-rules"; backup: unknown };
+  | { type: "import-rules"; backup: unknown }
+  | { type: "edit-hide-rule"; hostname: string; id: string; original: HideRuleDraft; rule: HideRuleDraft }
+  | { type: "set-hide-rule-paused"; hostname: string; id: string; paused: boolean }
+  | { type: "remove-hide-rule"; hostname: string; id: string };
 
 export interface WorkerResponse {
   ok: boolean;

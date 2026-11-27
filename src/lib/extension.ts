@@ -1,5 +1,5 @@
 import type {
-  ActiveSite, PageRequest, PageResponses, PauseOptions, Rule,
+  ActiveSite, HideRule, PageRequest, PageResponses, PauseOptions, Rule,
   StorageChanges, StoredValues, WorkerRequest, WorkerResponse
 } from "./extension-types";
 
@@ -8,7 +8,7 @@ const ruleData = globalThis;
 
 export const {
   RULE_NAME_MAX_LENGTH, TOTAL_CLICK_COUNT_KEY, AUTHORIZED_SITES_KEY, getExecutionOptions,
-  getRuleSites, getSiteRules, normalizeSiteHostname, siteClickCountsKey, siteLastClickTimesKey,
+  getRuleSites, getManagedRuleSites, getSiteRules, sameHideTarget, normalizeSiteHostname, siteClickCountsKey, siteLastClickTimesKey,
   createRuleBackup, parseRuleBackup, planRuleImport
 } = ruleData;
 
@@ -51,6 +51,17 @@ export async function readSiteRules(hostname: string): Promise<Rule[]> {
     [key]: false
   });
   return getSiteRules(stored, hostname);
+}
+
+export async function readSiteHideRules(hostname: string): Promise<HideRule[]> {
+  const stored = await chrome.storage.sync.get({ [ruleData.siteHideRulesKey(hostname)]: [] });
+  return ruleData.getSiteHideRules(stored, hostname);
+}
+
+export function isHideRuleChange(changes: StorageChanges, hostname?: string) {
+  return hostname
+    ? Object.hasOwn(changes, ruleData.siteHideRulesKey(hostname))
+    : Object.keys(changes).some((key) => key.startsWith(ruleData.SITE_HIDE_RULES_PREFIX));
 }
 
 export function isRuleChange(changes: StorageChanges, hostname?: string) {

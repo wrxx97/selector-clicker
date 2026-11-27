@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
-import { getRuleSites, isRuleChange, isStatsKey, listenToStorage, readRules, readStats } from "@/lib/extension";
-import type { RuleSite, StoredValues } from "@/lib/extension-types";
+import { getManagedRuleSites, isHideRuleChange, isRuleChange, isStatsKey, listenToStorage, readRules, readStats, sameHideTarget } from "@/lib/extension";
+import type { HideRule, ManagedRuleSite, Rule, StoredValues } from "@/lib/extension-types";
 
 interface RulesState {
-  sites: RuleSite[] | null;
+  sites: ManagedRuleSite[] | null;
   stats: StoredValues | null;
   search: string;
   loadError: boolean;
@@ -12,18 +12,26 @@ interface RulesState {
   loadRules(): Promise<void>;
 }
 
-function reuseSites(previous: RuleSite[] | null, incoming: RuleSite[]): RuleSite[] {
+function reuseRules<T extends Rule | HideRule>(old: T[], current: T[], same: (first: T, second: T) => boolean) {
+  const byId = new Map(old.map((rule) => [rule.id, rule]));
+  const rules = current.map((rule) => {
+    const prior = byId.get(rule.id);
+    return prior && same(prior, rule) ? prior : rule;
+  });
+  return shallow(old, rules) ? old : rules;
+}
+
+function reuseSites(previous: ManagedRuleSite[] | null, incoming: ManagedRuleSite[]): ManagedRuleSite[] {
   if (!previous) return incoming;
   const byHost = new Map(previous.map((site) => [site.hostname, site]));
   const sites = incoming.map((site) => {
     const old = byHost.get(site.hostname);
     if (!old) return site;
-    const byId = new Map(old.rules.map((rule) => [rule.id, rule]));
-    const rules = site.rules.map((rule) => {
-      const prior = byId.get(rule.id);
-      return prior && shallow(prior, rule) ? prior : rule;
-    });
-    return shallow(old.rules, rules) && old.paused === site.paused ? old : { ...site, rules };
+    const rules = reuseRules(old.rules, site.rules, shallow);
+    const hideRules = reuseRules(old.hideRules, site.hideRules, (first, second) =>
+      first.name === second.name && first.paused === second.paused && sameHideTarget(first, second));
+    return rules === old.rules && hideRules === old.hideRules && old.paused === site.paused
+      ? old : { ...site, rules, hideRules };
   });
   return shallow(previous, sites) ? previous : sites;
 }
@@ -41,7 +49,7 @@ export const useRulesStore = create<RulesState>((set) => {
       try {
         const stored = await readRules();
         if (current === request) set((state) => {
-          const sites = reuseSites(state.sites, getRuleSites(stored));
+          const sites = reuseSites(state.sites, getManagedRuleSites(stored));
           return sites === state.sites && !state.loadError ? state : { sites, loadError: false };
         });
       } catch {
@@ -55,7 +63,7 @@ export function startRules() {
   let active = true;
   const { loadRules } = useRulesStore.getState();
   const unsubscribe = listenToStorage((changes, area) => {
-    if (area === "sync" && isRuleChange(changes)) void loadRules();
+    if (area === "sync" && (isRuleChange(changes) || isHideRuleChange(changes))) void loadRules();
     if (area !== "local") return;
     const stats = Object.entries(changes).filter(([key]) => isStatsKey(key));
     if (stats.length) {

@@ -15,12 +15,12 @@ function ClickStats() {
   </div>;
 }
 
-export function PopupFooter() {
+export function PopupFooter({ showClicks }: { showClicks: boolean }) {
   const { t } = useTranslation();
   const { busy, manage } = usePopupStore(useShallow((state) => ({ busy: state.siteBusy, manage: state.manage })));
   return <footer className="flex items-center justify-between gap-2">
-    <ClickStats />
-    <div className="flex shrink-0 items-center gap-1.5">
+    {showClicks && <ClickStats />}
+    <div className="ml-auto flex shrink-0 items-center gap-1.5">
       <Button asChild size="icon" variant="secondary" className="rounded-full">
         <a href="https://github.com/wrxx97/selector-clicker/releases" target="_blank" rel="noopener noreferrer"
           aria-label={t("githubReleases")} title={t("githubReleases")}>

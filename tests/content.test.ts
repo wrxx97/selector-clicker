@@ -24,7 +24,7 @@ const scripts = ["site-rules.js", "picker.js", "content.js"] as const;
 const contentScript = scripts.map(compileRuntimeScript).join("\n");
 const siteKey = "siteSelectors:example.com";
 
-function createElement(options: Partial<ElementState> = {}) {
+function createElement(options: Partial<ElementState> = {}, descendants: Record<string, object[]> = {}) {
   const state = {
     clicks: 0,
     highlights: 0,
@@ -38,13 +38,30 @@ function createElement(options: Partial<ElementState> = {}) {
     ...options
   };
 
+  let priority = "";
+  let inlineDisplay = "";
   return {
     state,
+    style: {
+      getPropertyValue() { return inlineDisplay; },
+      getPropertyPriority() { return priority; },
+      setProperty(_key: string, value: string, nextPriority = "") {
+        inlineDisplay = value;
+        priority = nextPriority;
+        state.display = value;
+      },
+      removeProperty() {
+        inlineDisplay = "";
+        priority = "";
+        state.display = options.display ?? "block";
+      }
+    },
+    querySelectorAll(selector: string) { return descendants[selector] ?? []; },
     get isConnected() {
       return state.connected;
     },
-    matches() {
-      return state.disabled;
+    matches(selector: string) {
+      return selector.includes(":disabled") && state.disabled;
     },
     getBoundingClientRect() {
       return { width: state.width, height: state.height };
@@ -229,6 +246,71 @@ test("clicks visible matching elements after the configuration loads", async () 
     totalClicks: 1,
     ruleIds: ["selector:.ad-close"]
   });
+});
+
+test("clicks a unique real button within a matched wrapper and waits for the button to appear", async () => {
+  const button = createElement({ display: "none" });
+  const wrapper = createElement({}, { button: [button] });
+  const selector = '[id="skip-button:v"]';
+  const app = await startContentScript({
+    config: { enabled: true, [siteKey]: [selector] },
+    elementsBySelector: { [selector]: [wrapper] }
+  });
+  assert.equal(button.state.clicks, 0);
+  assert.equal(wrapper.state.clicks, 0);
+
+  button.state.display = "block";
+  app.observer.notify("attributes");
+  app.runScheduledScans();
+  assert.equal(button.state.clicks, 1);
+  assert.equal(wrapper.state.clicks, 0);
+  assert.equal(app.messages.filter((message) => message.type === "click-record").length, 1);
+});
+
+test("hides a single element and only the cards with the selected marker text, even with clicking off", async () => {
+  const adMarker = { textContent: " Ad  " };
+  const regularMarker = { textContent: "Featured" };
+  const adCard = createElement({}, { ".label": [adMarker] });
+  const regularCard = createElement({}, { ".label": [regularMarker] });
+  const popup = createElement();
+  popup.style.setProperty("display", "grid", "important");
+  const rulesKey = "siteHideRules:example.com";
+  const direct = { id: "popup", selector: "#notice", name: "", paused: false };
+  const conditional = {
+    id: "ad", selector: ".card", name: "Ad card", paused: false,
+    contains: { selector: ".label", text: "Ad" }
+  };
+  const cards = [adCard, regularCard];
+  const app = await startContentScript({
+    config: { enabled: false, [rulesKey]: [direct, conditional] },
+    elementsBySelector: { "#notice": [popup], ".card": cards }
+  });
+
+  assert.equal(popup.state.display, "none");
+  assert.equal(adCard.state.display, "none");
+  assert.equal(regularCard.state.display, "block");
+  assert.equal(app.messages.some((message) => message.type === "click-record"), false);
+
+  const newCard = createElement({}, { ".label": [{ textContent: "Ad" }] });
+  cards.push(newCard);
+  adMarker.textContent = "Featured";
+  regularMarker.textContent = "Ad";
+  app.observer.notify("characterData");
+  app.runScheduledScans();
+  assert.equal(adCard.state.display, "block");
+  assert.equal(regularCard.state.display, "none");
+  assert.equal(newCard.state.display, "none");
+
+  const [storageChanged] = app.storageListeners;
+  storageChanged({ [rulesKey]: { newValue: [direct, { ...conditional, paused: true }] } }, "sync");
+  assert.equal(regularCard.state.display, "block");
+  assert.equal(newCard.state.display, "block");
+  assert.equal(popup.state.display, "none");
+
+  storageChanged({ hideEnabled: { newValue: false } }, "sync");
+  assert.equal(popup.state.display, "grid");
+  assert.equal(popup.style.getPropertyPriority(), "important");
+  assert.equal(app.observer.options, undefined);
 });
 
 test("scans when an existing matching element becomes visible after an attribute change", async () => {
