@@ -13,6 +13,7 @@ import { startLanguage, translate, useLanguageStore } from "@/lib/i18n";
 import { startTheme } from "@/lib/theme";
 import { BackupDialog, EditorDialog, SiteDialog, type ManagerDialog, type OpenManagerDialog } from "./dialogs";
 import { CooldownSettings } from "./settings";
+import { ExperimentalSettings } from "./experimental-settings";
 import { RulesList } from "./sites";
 import { LanguageSettings } from "./language-settings";
 import { ThemeSettings } from "./theme-settings";
@@ -65,9 +66,7 @@ const BackupActions = memo(function BackupActions({ openDialog, setFeedback }: {
     const { sites } = useRulesStore.getState();
     if (!sites) return;
     try {
-      const clickSites = sites.flatMap(({ hostname, rules }) =>
-        rules.length ? [{ hostname, rules, paused: rules.every((rule) => rule.paused) }] : []);
-      await navigator.clipboard.writeText(formatRuleBackup(clickSites));
+      await navigator.clipboard.writeText(formatRuleBackup(sites));
       setFeedback({ text: t("rulesCopied") });
     } catch {
       setFeedback({ text: t("copyRulesError"), error: true });
@@ -162,6 +161,7 @@ function RuleManager() {
     <LanguageSettings setFeedback={setFeedback} />
     <ThemeSettings setFeedback={setFeedback} />
     <Settings setFeedback={setFeedback} dismiss={dismiss} />
+    <ExperimentalSettings setFeedback={setFeedback} />
     <section aria-label={t("searchAndBackup")} className="flex flex-wrap items-center justify-between gap-2">
       <RuleSearch searchInput={searchInput} />
       <BackupActions openDialog={openDialog} setFeedback={setFeedback} />

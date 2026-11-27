@@ -96,7 +96,7 @@ function createWorker(now = Date.now) {
     onPermissionsAdded: (origins: string[]) => permissionsAdded({ origins }),
     onPermissionsRemoved: () => permissionsRemoved(),
     backup() {
-      const create = vm.runInContext("(stored) => createRuleBackup(getRuleSites(stored))", context) as (stored: StoredValues) => RuleBackup;
+      const create = vm.runInContext("(stored) => createRuleBackup(getManagedRuleSites(stored))", context) as (stored: StoredValues) => RuleBackup;
       return structuredClone(create(Object.fromEntries([...store, ...local])));
     },
     send(message: WorkerMessage, sender: WorkerSender = {}) {
@@ -457,6 +457,68 @@ test("imports a backup atomically, skips duplicates, and preserves existing rule
   assert.deepEqual(await worker.send({ type: "import-rules", backup: broken }, sender), { ok: false });
   assert.equal(worker.store.has("siteSelectors:other.example"), false);
 });
+
+test("round-trips mixed and hide-only backups while retaining existing rules and matching conditions", async () => {
+  const source = createWorker();
+  const target = createWorker();
+  const hostname = "example.com";
+  const hideOnlyHost = "hide-only.example.com";
+  const key = `siteHideRules:${hostname}`;
+  const manager = { url: "chrome-extension://test/rules.html" };
+  const page = { url: "https://example.com/", tab: { id: 1 } };
+  const direct = { selector: ".card", name: "Source direct rule" };
+  const conditional = { selector: ".card", name: "Ad cards", contains: { selector: ".label", text: "Ad" } };
+  const otherCondition = { selector: ".card", name: "Featured", contains: { selector: ".label", text: "Featured" } };
+  const popup = { selector: "#notice", name: "Notice" };
+
+  await source.send({ type: "save-site-selector", selector: ".card", name: "Click" }, page);
+  for (const rule of [direct, conditional, otherCondition]) {
+    await source.send({ type: "save-hide-rule", rule }, page);
+  }
+  const pausedId = source.store.read<HideRule[]>(key)[1].id;
+  await source.send({ type: "set-hide-rule-paused", hostname, id: pausedId, paused: true }, manager);
+  await source.send({ type: "save-hide-rule", rule: popup }, { ...page, url: "https://hide-only.example.com/" });
+  const backup = source.backup();
+  assert.deepEqual(backup.sites, [
+    {
+      hostname, paused: false, rules: [{ selector: ".card", name: "Click", paused: false, maxClicks: 0, pathPrefix: "" }],
+      hideRules: [{ ...direct, paused: false }, { ...conditional, paused: true }, { ...otherCondition, paused: false }]
+    },
+    { hostname: hideOnlyHost, paused: false, rules: [], hideRules: [{ ...popup, paused: false }] }
+  ]);
+
+  await target.send({ type: "save-hide-rule", rule: { ...direct, name: "Keep this name" } }, page);
+  const retained = structuredClone(target.store.read<HideRule[]>(key)[0]);
+  backup.sites[0].hideRules?.push({ ...conditional, paused: false, contains: { selector: ".label", text: "  Ad  " } });
+  assert.deepEqual(await target.send({ type: "import-rules", backup }, manager), {
+    ok: true, addedCount: 4, duplicateCount: 2
+  });
+  const saved = structuredClone(target.store.read<HideRule[]>(key));
+  assert.deepEqual(saved[0], retained);
+  assert.deepEqual(saved.slice(1).map(({ id, ...rule }) => {
+    assert.ok(id);
+    return rule;
+  }), [{ ...conditional, paused: true }, { ...otherCondition, paused: false }]);
+  assert.deepEqual(target.backup().sites[1], backup.sites[1]);
+  assert.deepEqual(await target.send({ type: "import-rules", backup }, manager), {
+    ok: true, addedCount: 0, duplicateCount: 6
+  });
+});
+
+test("rejects a malformed hidden condition before writing any imported rule", async () => {
+  const worker = createWorker();
+  const backup = {
+    format: "selector-clicker-rules", version: 1,
+    sites: [
+      { hostname: "valid.example", rules: [], hideRules: [{ selector: "#hide" }] },
+      { hostname: "invalid.example", rules: [], hideRules: [{ selector: "#bad", contains: { selector: "" } }] }
+    ]
+  };
+  const manager = { url: "chrome-extension://test/rules.html" };
+  assert.deepEqual(await worker.send({ type: "import-rules", backup }, manager), { ok: false });
+  assert.equal(worker.store.has("siteHideRules:valid.example"), false);
+});
+
 
 test("registers content scripts only for exact granted origins and removes them on revocation", async () => {
   const worker = createWorker();

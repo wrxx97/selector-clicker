@@ -21,7 +21,7 @@ const assets = [
     [16, 24, 32].map((size) => `icons/icon-${theme}-${size}.png`))
 ];
 
-const extensionAssets: Plugin = {
+const extensionAssets = (experimental: boolean): Plugin => ({
   name: "selector-clicker-extension-assets",
   buildStart() {
     for (const file of assets) this.addWatchFile(resolve(project, file));
@@ -31,7 +31,13 @@ const extensionAssets: Plugin = {
   },
   async generateBundle() {
     for (const file of assets) {
-      this.emitFile({ type: "asset", fileName: file, source: await readFile(resolve(project, file)) });
+      let contents = await readFile(resolve(project, file));
+      if (file === "manifest.json" && experimental) {
+        const manifest = JSON.parse(contents.toString("utf8")) as chrome.runtime.ManifestV3;
+        manifest.permissions = [...(manifest.permissions ?? []), "debugger"];
+        contents = Buffer.from(JSON.stringify(manifest, null, 2) + "\n");
+      }
+      this.emitFile({ type: "asset", fileName: file, source: contents });
     }
     for (const asset of manifestLocaleAssets()) this.emitFile({ type: "asset", ...asset });
     for (const file of runtimeScripts) {
@@ -41,7 +47,7 @@ const extensionAssets: Plugin = {
   transformIndexHtml() {
     return [{ tag: "script", attrs: { src: "./site-rules.js" }, injectTo: "head-prepend" }];
   }
-};
+});
 
 const dependencyLicenses: Plugin = {
   name: "selector-clicker-dependency-licenses",
@@ -60,14 +66,14 @@ const dependencyLicenses: Plugin = {
   }
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: source,
   base: "./",
   publicDir: false,
-  plugins: [react(), tailwindcss(), extensionAssets, dependencyLicenses],
+  plugins: [react(), tailwindcss(), extensionAssets(mode === "experimental"), dependencyLicenses],
   resolve: { alias: { "@": source } },
   build: {
-    outDir: resolve(project, "dist"),
+    outDir: resolve(project, mode === "experimental" ? "dist-experimental" : "dist"),
     emptyOutDir: true,
     target: "chrome111",
     license: { fileName: licenseReport },
@@ -77,4 +83,4 @@ export default defineConfig({
       input: { popup: resolve(source, "popup.html"), rules: resolve(source, "rules.html") }
     }
   }
-});
+}));

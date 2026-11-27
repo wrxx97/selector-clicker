@@ -1,7 +1,10 @@
 declare var selectorClickerContentLoaded: boolean | undefined;
 declare var selectorClickerPicker: typeof import("./picker");
+type ContentBrowserClickPoint = import("../lib/extension-types").BrowserClickPoint;
+type ContentBrowserClickRequest = Extract<import("../lib/extension-types").WorkerRequest, { type: "browser-click" }>;
 type ContentPageResponses = import("../lib/extension-types").PageResponses;
-type ClickTarget = Element & { click(): void };
+type NativeClickTarget = Element & { click(): void };
+type ClickTarget = NativeClickTarget | SVGElement;
 type RuleInspection =
   | { status: "ready" | "cooldown"; target: ClickTarget; count?: never }
   | { status: "disabled"; target: Element; count?: never }
@@ -30,6 +33,11 @@ type RuleInspection =
   let siteAuthorized = false;
   let initialized = false;
   let authorizationChanged = false;
+  let experimentalSettingChanged = false;
+  let browserClickEnabled = false;
+  let browserClickJob: { rule: RuntimeRule; target: Element; url: string } | undefined;
+  let browserClickScan: Promise<void> | undefined;
+  let browserScanQueued = false;
   let languageChanged = false;
   const { languageStorageKey: languageKey, normalizePreference, resolveLocale, createElementPicker } = selectorClickerPicker;
   const pendingSettings: RuntimeStored = {};
@@ -38,6 +46,7 @@ type RuleInspection =
   let hideRules: RuntimeHideRule[] = [];
   const hiddenElements = new Map<HTMLElement | SVGElement, { value: string; priority: string }>();
   const lastClicks = new WeakMap<Element, number>();
+  const lastBrowserAttempts = new WeakMap<Element, number>();
   const ruleClicks = new Map<string, number>();
   const picker = createElementPicker(async (rule, mode, editing) => {
     if (!siteAuthorized) return "pickerAccessRevoked";
@@ -66,6 +75,10 @@ type RuleInspection =
     );
   }
 
+  function hasNativeClick(element: Element): element is NativeClickTarget {
+    return "click" in element && typeof element.click === "function";
+  }
+
   function getClickTarget(element: Element): Element {
     if (element.matches("button, a[href], input, select, textarea, summary, label, [onclick]")) return element;
     const buttons = element.querySelectorAll("button");
@@ -85,15 +98,16 @@ type RuleInspection =
     if (matches.length > 1) return { status: "ambiguous", count: matches.length };
     const [selected] = matches;
     if (!selected.isConnected || !isVisible(selected)) return { status: "hidden" };
-    if (selected.matches(":disabled, [aria-disabled='true']")) return { status: "disabled", target: selected };
+    const disabledControl = ":disabled, [aria-disabled='true']";
+    if (selected.closest(disabledControl)) return { status: "disabled", target: selected };
     const target = getClickTarget(selected);
     if (target !== selected && (!target.isConnected || !isVisible(target))) return { status: "hidden" };
-    if (!("click" in target) || typeof target.click !== "function" || target.matches(":disabled, [aria-disabled='true']")) {
+    if ((target !== selected && target.closest(disabledControl)) || (!hasNativeClick(target) && !(target instanceof SVGElement))) {
       return { status: "disabled", target };
     }
     const lastClick = lastClicks.get(target);
     const status = lastClick != null && Date.now() - lastClick < config.cooldown ? "cooldown" : "ready";
-    return { status, target: target as ClickTarget };
+    return { status, target };
   }
 
   function testRule(selector: string): ContentPageResponses["test-rule"] {
@@ -162,10 +176,73 @@ type RuleInspection =
     }
   }
 
+  function browserClickPoint(target: Element): ContentBrowserClickPoint | null {
+    if (document.visibilityState !== "visible") return null;
+    for (const rect of target.getClientRects()) {
+      const left = Math.max(0, rect.left);
+      const top = Math.max(0, rect.top);
+      const right = Math.min(document.documentElement.clientWidth, rect.right);
+      const bottom = Math.min(document.documentElement.clientHeight, rect.bottom);
+      if (right <= left || bottom <= top) continue;
+      const x = (left + right) / 2;
+      const y = (top + bottom) / 2;
+      if (target.contains(document.elementFromPoint(x, y))) return { x, y };
+    }
+    return null;
+  }
+
+  function prepareBrowserClick(ruleId: unknown): ContentBrowserClickPoint | null {
+    const job = browserClickJob;
+    if (!job || job.rule.id !== ruleId || job.url !== location.href ||
+        !browserClickEnabled || !automaticClickEnabled() || picker.active) return null;
+    const rule = siteRules.find((item) => item.id === ruleId);
+    if (!rule || rule.selector !== job.rule.selector || ruleRestriction(rule)) return null;
+    const { status, target } = inspectRule(rule.selector);
+    return status === "ready" && target === job.target ? browserClickPoint(target) : null;
+  }
+
+  function recordRuleClick(rule: RuntimeRule) {
+    ruleClicks.set(rule.id, (ruleClicks.get(rule.id) || 0) + 1);
+    totalClicks += 1;
+  }
+
+  async function scanWithBrowserInput() {
+    for (const saved of siteRules) {
+      if (!browserClickEnabled || !automaticClickEnabled() || picker.active) break;
+      const rule = siteRules.find((item) => item.id === saved.id);
+      if (!rule || ruleRestriction(rule)) continue;
+      const { status, target } = inspectRule(rule.selector);
+      if (status !== "ready" || Date.now() - (lastBrowserAttempts.get(target) ?? -Infinity) < config.cooldown ||
+          !browserClickPoint(target)) continue;
+
+      lastBrowserAttempts.set(target, Date.now());
+      browserClickJob = { rule, target, url: location.href };
+      const request: ContentBrowserClickRequest = { type: "browser-click", ruleId: rule.id };
+      const result = await chrome.runtime.sendMessage(request).catch(() => undefined);
+      browserClickJob = undefined;
+      if (result?.ok !== true) continue;
+
+      lastClicks.set(target, Date.now());
+      recordRuleClick(rule);
+      void chrome.runtime.sendMessage({ type: "click-record", totalClicks, ruleIds: [rule.id] }).catch(() => {});
+    }
+  }
+
   function scan() {
     if (picker.active) return;
     updateHiddenElements();
     if (!automaticClickEnabled()) return;
+    if (browserClickScan) return browserClickScan;
+    if (browserClickEnabled) {
+      browserClickScan = scanWithBrowserInput().finally(() => {
+        browserClickScan = undefined;
+        if (browserScanQueued) {
+          browserScanQueued = false;
+          scheduleScan();
+        }
+      });
+      return browserClickScan;
+    }
 
     const ruleIds = [];
     for (const rule of siteRules) {
@@ -173,9 +250,9 @@ type RuleInspection =
       const { status, target } = inspectRule(rule.selector);
       if (status !== "ready") continue;
       lastClicks.set(target, Date.now());
-      target.click();
-      ruleClicks.set(rule.id, (ruleClicks.get(rule.id) || 0) + 1);
-      totalClicks += 1;
+      if (hasNativeClick(target)) target.click();
+      else target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, view: window }));
+      recordRuleClick(rule);
       ruleIds.push(rule.id);
     }
     if (ruleIds.length) {
@@ -187,7 +264,8 @@ type RuleInspection =
     if ((!automaticClickEnabled() && !automaticHideEnabled()) || picker.active || mutationTimer !== null) return;
     mutationTimer = window.setTimeout(() => {
       mutationTimer = null;
-      scan();
+      if (browserClickScan) browserScanQueued = true;
+      else scan();
     }, 100);
   }
 
@@ -223,26 +301,37 @@ type RuleInspection =
   }
 
   const observer = new MutationObserver(scheduleScan);
+  document.addEventListener("visibilitychange", () => {
+    if (browserClickEnabled && document.visibilityState === "visible") scheduleScan();
+  });
   (window as Window & { navigation?: EventTarget }).navigation?.addEventListener("currententrychange", scheduleScan);
 
   const initialConfig = Promise.all([
     chrome.storage.sync.get({ ...DEFAULTS, [languageKey]: "auto" }),
-    chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [] })
+    chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [], [BROWSER_CLICK_ENABLED_KEY]: false })
   ]).then(([settings, local]) => {
     if (!authorizationChanged) siteAuthorized = storageStrings(local[AUTHORIZED_SITES_KEY]).includes(accessPattern);
+    if (!experimentalSettingChanged) browserClickEnabled = local[BROWSER_CLICK_ENABLED_KEY] === true && supportsBrowserClick();
     if (!languageChanged) picker.setLocale(resolveLocale(normalizePreference(settings[languageKey])));
     applyConfig({ ...settings, ...pendingSettings });
     initialized = true;
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "local" && Object.hasOwn(changes, AUTHORIZED_SITES_KEY)) {
-      authorizationChanged = true;
-      siteAuthorized = storageStrings(changes[AUTHORIZED_SITES_KEY].newValue).includes(accessPattern);
-      if (!siteAuthorized) {
-        picker.stop();
-        ruleHighlight?.cancel();
+    if (areaName === "local") {
+      if (Object.hasOwn(changes, BROWSER_CLICK_ENABLED_KEY)) {
+        experimentalSettingChanged = true;
+        browserClickEnabled = changes[BROWSER_CLICK_ENABLED_KEY].newValue === true && supportsBrowserClick();
+        if (initialized) scheduleScan();
       }
-      if (initialized) applyConfig(config);
+      if (Object.hasOwn(changes, AUTHORIZED_SITES_KEY)) {
+        authorizationChanged = true;
+        siteAuthorized = storageStrings(changes[AUTHORIZED_SITES_KEY].newValue).includes(accessPattern);
+        if (!siteAuthorized) {
+          picker.stop();
+          ruleHighlight?.cancel();
+        }
+        if (initialized) applyConfig(config);
+      }
       return;
     }
     if (areaName !== "sync") return;
@@ -276,7 +365,7 @@ type RuleInspection =
     applyConfig(changedConfig, true, hideOnly);
   });
 
-  chrome.runtime.onMessage.addListener((payload: unknown, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) => {
     const message = recordValues(payload);
     if (message.type === "get-status") {
       const status = () => ({
@@ -290,8 +379,15 @@ type RuleInspection =
         return true;
       }
     }
+    if (message.type === "browser-click-point" && !sender.tab && sender.id === chrome.runtime.id) {
+      sendResponse(prepareBrowserClick(message.ruleId));
+    }
     if (message.type === "scan-now") {
-      scan();
+      const completion = scan();
+      if (completion) {
+        completion.then(() => sendResponse({ totalClicks }));
+        return true;
+      }
       sendResponse({ totalClicks });
     }
     if (message.type === "test-rule" && typeof message.selector === "string" && siteAuthorized && message.hostname === hostname) {

@@ -16,13 +16,6 @@ type PickerSave = (rule: HideRuleDraft, mode: PickerMode, editing?: RuntimeRule)
 var PICKER_CONTROL = 'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [onclick]';
 var PICKER_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "aria-label", "name", "title"];
 
-function getPickerTarget(hit: Element | null) {
-  const element = hit?.closest(PICKER_CONTROL) || hit;
-  return element instanceof HTMLElement &&
-    !element.matches("html, body, iframe, frame") &&
-    typeof element.click === "function" ? element : null;
-}
-
 function getPickerSelector(target: Element) {
   let relativePath = "";
   for (let element: Element | null = target; element; element = element.parentElement) {
@@ -247,7 +240,7 @@ export function createElementPicker(saveRule: PickerSave, resumeScan: () => void
     panel.append(title, status, preview, nameField, actions);
     shadow.append(surface, markerOutline, outline, panel);
 
-    let markerHitTestSheet: CSSStyleSheet | undefined;
+    let preciseHitTestSheet: CSSStyleSheet | undefined;
     let marker: { target: Element; condition: HideCondition } | null = null;
     let hovered: Element | null;
     let selected: PickerSelection | null;
@@ -310,7 +303,7 @@ export function createElementPicker(saveRule: PickerSave, resumeScan: () => void
         setStatus("pickerInstructions");
       } else {
         setTitle(editing ? "pickerRepickTitle" : "pickerPickTitle");
-        setStatus("pickerInstructions");
+        setStatus("pickerClickInstructions");
       }
       updateOutline();
     }
@@ -337,22 +330,19 @@ export function createElementPicker(saveRule: PickerSave, resumeScan: () => void
       window.setTimeout(() => host.remove(), 1800);
     }
 
-    function hitTestMarker(x: number, y: number) {
-      if (!markerHitTestSheet) {
-        markerHitTestSheet = new CSSStyleSheet();
+    function hitTestPrecise(x: number, y: number, scope?: Element) {
+      if (!preciseHitTestSheet) {
+        preciseHitTestSheet = new CSSStyleSheet();
         // Some labels sit on overlays that let ordinary pointer events reach the cover.
-        markerHitTestSheet.replaceSync("body * { pointer-events: auto !important; }");
+        preciseHitTestSheet.replaceSync("body * { pointer-events: auto !important; }");
       }
 
       const sheets = document.adoptedStyleSheets;
-      sheets.push(markerHitTestSheet);
+      sheets.push(preciseHitTestSheet);
       try {
         // A pointer-transparent page overlay can become the first hit under the temporary stylesheet.
-        const hit = document.elementsFromPoint(x, y).find((element) =>
-          canHideElement(element) && !isPageContainer(element));
-        if (!hit) return null;
-        const target = getMarkerTarget(hit);
-        return isPageContainer(target) ? hit : target;
+        return document.elementsFromPoint(x, y).find((element) =>
+          (!scope || scope.contains(element)) && canHideElement(element) && !isPageContainer(element)) ?? null;
       } finally {
         sheets.pop();
       }
@@ -362,10 +352,22 @@ export function createElementPicker(saveRule: PickerSave, resumeScan: () => void
       surface.style.pointerEvents = "none";
       try {
         const { clientX, clientY } = event;
-        if (mode === "hide-containing" && !marker) return hitTestMarker(clientX, clientY);
+        if (mode === "hide-containing" && !marker) {
+          const hit = hitTestPrecise(clientX, clientY);
+          if (!hit) return null;
+          const target = getMarkerTarget(hit);
+          return isPageContainer(target) ? hit : target;
+        }
         const hit = document.elementFromPoint(clientX, clientY);
-        if (mode === "click") return getPickerTarget(hit);
         if (!hit || !canHideElement(hit) || marker?.target.contains(hit)) return null;
+        if (mode === "click") {
+          if (hit.matches("iframe")) return null;
+          const control = hit.closest(PICKER_CONTROL);
+          if (event.shiftKey) return control && canHideElement(control) ? control : hit;
+          const scope = control ?? hit;
+          const target = scope.childElementCount ? hitTestPrecise(clientX, clientY, scope) ?? hit : hit;
+          return target.matches("iframe") ? null : target;
+        }
         if (!marker) return hit;
         const bounds = marker.target.getBoundingClientRect();
         if (clientX >= bounds.left && clientX < bounds.right && clientY >= bounds.top && clientY < bounds.bottom) return null;

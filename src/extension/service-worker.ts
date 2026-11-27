@@ -11,6 +11,7 @@ let siteRuleUpdates: Promise<unknown> = Promise.resolve();
 let clickStatsUpdates = Promise.resolve();
 let siteAccessUpdates: Promise<unknown> = Promise.resolve();
 let toolbarIconUpdates = Promise.resolve();
+const browserClickTabs = new Set<number>();
 const SITE_SCRIPT_ID = "selector-clicker-sites";
 const toolbarThemes = new Set(["lavender", "rose", "amber", "night"]);
 
@@ -342,14 +343,21 @@ function importRules(backup: unknown) {
       defaults[siteSelectorsKey(hostname)] = [];
       defaults[siteRuleDetailsKey(hostname)] = {};
       defaults[sitePausedKey(hostname)] = false;
+      defaults[siteHideRulesKey(hostname)] = [];
     }
     const stored = await chrome.storage.sync.get(defaults);
     const changes: RuntimeStored = {};
     let addedCount = 0;
     let duplicateCount = 0;
-    for (const { hostname, existing, added, duplicates } of planRuleImport(stored, sites)) {
-      addedCount += added.length;
+    for (const { hostname, existing, added, duplicates, existingHideRules, addedHideRules } of planRuleImport(stored, sites)) {
+      addedCount += added.length + addedHideRules.length;
       duplicateCount += duplicates;
+      if (addedHideRules.length) {
+        changes[siteHideRulesKey(hostname)] = [
+          ...existingHideRules,
+          ...addedHideRules.map((rule) => ({ ...rule, id: crypto.randomUUID() }))
+        ];
+      }
       if (!added.length) continue;
       const selectorsKey = siteSelectorsKey(hostname);
       const detailsKey = siteRuleDetailsKey(hostname);
@@ -385,8 +393,68 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.permissions.onAdded.addListener(({ origins }) => updateSiteAccess(origins).catch(() => {}));
 chrome.permissions.onRemoved.addListener(() => updateSiteAccess().catch(() => {}));
 
+function browserClickPoint(payload: unknown) {
+  const { x, y } = recordValues(payload);
+  return typeof x === "number" && Number.isFinite(x) && x >= 0 &&
+    typeof y === "number" && Number.isFinite(y) && y >= 0 ? { x, y } : null;
+}
+
+async function dispatchBrowserClick(sender: chrome.runtime.MessageSender, ruleId: unknown) {
+  const { tab, url, frameId, documentId, documentLifecycle } = sender;
+  const tabId = tab?.id;
+  const pattern = getSiteAccessPattern(url);
+  if (!chrome.debugger || sender.id !== chrome.runtime.id || tabId == null || frameId !== 0 ||
+      !documentId || documentLifecycle !== "active" || !pattern || typeof ruleId !== "string" || !ruleId ||
+      browserClickTabs.has(tabId)) return false;
+
+  const debuggee = { tabId };
+  async function isActiveTab() {
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return activeTab?.id === debuggee.tabId && activeTab.url === url;
+  }
+
+  async function currentPoint() {
+    const result: unknown = await chrome.tabs.sendMessage(debuggee.tabId, { type: "browser-click-point", ruleId }, { documentId });
+    return browserClickPoint(result);
+  }
+
+  browserClickTabs.add(tabId);
+  let attached = false;
+  try {
+    const stored = await chrome.storage.local.get({ [AUTHORIZED_SITES_KEY]: [], [BROWSER_CLICK_ENABLED_KEY]: false });
+    if (stored[BROWSER_CLICK_ENABLED_KEY] !== true || !storageStrings(stored[AUTHORIZED_SITES_KEY]).includes(pattern) ||
+        !await chrome.permissions.contains({ origins: [pattern] }) || !await isActiveTab()) return false;
+
+    await chrome.debugger.attach(debuggee, "1.3");
+    attached = true;
+    const point = await currentPoint();
+    if (!point || !await isActiveTab()) return false;
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    const next = await currentPoint();
+    if (!next || point.x !== next.x || point.y !== next.y || !await isActiveTab()) return false;
+
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+      type: "mousePressed", ...point, button: "left", buttons: 1, clickCount: 1
+    });
+    await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+      type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount: 1
+    });
+    return true;
+  } finally {
+    if (attached) await chrome.debugger.detach(debuggee).catch(() => {});
+    browserClickTabs.delete(tabId);
+  }
+}
+
 chrome.runtime.onMessage.addListener((payload: unknown, sender, sendResponse) => {
   const message = recordValues(payload);
+  if (message.type === "browser-click") {
+    dispatchBrowserClick(sender, message.ruleId).then(
+      (ok) => sendResponse({ ok }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
+  }
   if (message.type === "authorize-site") {
     if (sender.url !== chrome.runtime.getURL("popup.html")) return;
     const { pattern } = message;

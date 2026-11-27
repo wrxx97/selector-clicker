@@ -293,10 +293,10 @@ export function BackupDialog({ source, onClose, onSaved, returnFocus }: DialogCa
       </DialogHeader>
       <form id="import-form" className="grid gap-3" onSubmit={submit}>
         {preview ? <ul className="grid max-h-56 gap-1.5 overflow-auto" aria-label={t("previewBySite")}>
-          {preview.entries.map(({ hostname, added, duplicates }) =>
+          {preview.entries.map(({ hostname, added, addedHideRules, duplicates }) =>
             <li key={hostname} className="break-all rounded-lg border bg-muted/50 px-3 py-2">
               <strong>{hostname}</strong>
-              <span className="ml-2 text-xs text-muted-foreground">{t("siteImportCounts", { added: added.length, duplicates })}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{t("siteImportCounts", { added: added.length + addedHideRules.length, duplicates })}</span>
             </li>)}
         </ul> : <label className="grid gap-1.5">
           {t("ruleJson")}

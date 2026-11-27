@@ -47,22 +47,35 @@ export type StorageChanges = Record<string, chrome.storage.StorageChange>;
 export type StoredValues = Record<string, unknown>;
 
 type BackupRule = Omit<Rule, "id">;
-export type BackupSite = Omit<RuleSite, "rules"> & { rules: BackupRule[] };
+type BackupHideRule = Omit<HideRule, "id">;
+export type BackupSite = Omit<RuleSite, "rules"> & { rules: BackupRule[]; hideRules?: BackupHideRule[] };
 export interface RuleBackup {
   format: string;
   version: number;
   sites: BackupSite[];
 }
 
-export type ImportSite = BackupSite & { existing: Rule[]; added: BackupRule[]; duplicates: number };
+export type ImportSite = BackupSite & {
+  existing: Rule[];
+  added: BackupRule[];
+  existingHideRules: HideRule[];
+  addedHideRules: BackupHideRule[];
+  duplicates: number;
+};
 
 export type RuleTestStatus =
   | "ready" | "missing" | "removed" | "hidden" | "disabled" | "cooldown" | "invalid"
   | "ambiguous" | "site-paused" | "rule-paused" | "out-of-scope" | "limit-reached";
 
+export interface BrowserClickPoint {
+  x: number;
+  y: number;
+}
+
 export type PageRequest =
   | { type: "get-status" | "scan-now" }
   | { type: "test-rule"; selector: string }
+  | { type: "browser-click-point"; ruleId: string }
   | { type: "start-picker"; selector?: string; expectedId?: string; mode?: PickerMode };
 
 export interface PageResponses {
@@ -70,10 +83,12 @@ export interface PageResponses {
   "scan-now": { totalClicks: number };
   "test-rule": { status: RuleTestStatus; count?: number };
   "start-picker": { ok: boolean };
+  "browser-click-point": BrowserClickPoint | null;
 }
 
 export type WorkerRequest =
   | { type: "authorize-site"; pattern: string }
+  | { type: "browser-click"; ruleId: string }
   | { type: "set-site-paused"; hostname: string; paused: boolean }
   | { type: "set-managed-site-paused"; hostname: string; paused: boolean }
   | { type: "rename-site"; hostname: string; destination: string; expectedRuleIds: string[]; expectedHideRuleIds?: string[] }

@@ -1,15 +1,15 @@
-import { createRuleBackup, getRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension";
+import { createRuleBackup, getManagedRuleSites, parseRuleBackup, planRuleImport, readRules } from "./extension";
 import { translate as t } from "./i18n";
-import type { ImportSite, RuleSite } from "./extension-types";
+import type { ImportSite, ManagedRuleSite } from "./extension-types";
 
 export const MAX_BACKUP_BYTES = 1024 * 1024;
 
-export function formatRuleBackup(sites: RuleSite[]) {
+export function formatRuleBackup(sites: ManagedRuleSite[]) {
   return JSON.stringify(createRuleBackup(sites), null, 2) + "\n";
 }
 
 export async function exportRuleFile() {
-  const file = new Blob([formatRuleBackup(getRuleSites(await readRules()))], { type: "application/json" });
+  const file = new Blob([formatRuleBackup(getManagedRuleSites(await readRules()))], { type: "application/json" });
   const url = URL.createObjectURL(file);
   const link = document.createElement("a");
   link.href = url;
@@ -56,7 +56,7 @@ export async function previewRuleImport(text: string): Promise<BackupPreview> {
   return {
     backup,
     entries,
-    added: entries.reduce((count, entry) => count + entry.added.length, 0),
+    added: entries.reduce((count, entry) => count + entry.added.length + entry.addedHideRules.length, 0),
     duplicates: entries.reduce((count, entry) => count + entry.duplicates, 0)
   };
 }

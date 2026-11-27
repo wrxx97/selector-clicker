@@ -7,8 +7,8 @@ import type {
 const ruleData = globalThis;
 
 export const {
-  RULE_NAME_MAX_LENGTH, TOTAL_CLICK_COUNT_KEY, AUTHORIZED_SITES_KEY, getExecutionOptions,
-  getRuleSites, getManagedRuleSites, getSiteRules, sameHideTarget, normalizeSiteHostname, siteClickCountsKey, siteLastClickTimesKey,
+  RULE_NAME_MAX_LENGTH, TOTAL_CLICK_COUNT_KEY, AUTHORIZED_SITES_KEY, BROWSER_CLICK_ENABLED_KEY, supportsBrowserClick, getExecutionOptions,
+  getManagedRuleSites, getSiteRules, sameHideTarget, normalizeSiteHostname, siteClickCountsKey, siteLastClickTimesKey,
   createRuleBackup, parseRuleBackup, planRuleImport
 } = ruleData;
 

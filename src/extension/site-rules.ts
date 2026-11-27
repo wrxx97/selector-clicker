@@ -33,6 +33,11 @@ var TOTAL_CLICK_COUNT_KEY = "totalClickCount";
 var RULE_NAME_MAX_LENGTH = 80;
 var RULE_BACKUP_FORMAT = "selector-clicker-rules";
 var AUTHORIZED_SITES_KEY = "authorizedSitePatterns";
+var BROWSER_CLICK_ENABLED_KEY = "experimentalBrowserClick";
+
+function supportsBrowserClick() {
+  return chrome.runtime.getManifest().permissions?.includes("debugger") === true;
+}
 var SITE_SCRIPT_FILES = ["site-rules.js", "picker.js", "content.js"];
 
 function getSiteHostname(url: unknown) {
@@ -186,11 +191,14 @@ function getManagedRuleSites(stored: RuntimeStored): RuntimeManagedRuleSite[] {
   return [...sites.values()].sort((first, second) => first.hostname.localeCompare(second.hostname));
 }
 
-function createRuleBackup(ruleSites: RuntimeRuleSite[]): RuntimeBackup {
-  const sites = ruleSites.map(({ hostname, paused, rules }) => ({
+function createRuleBackup(ruleSites: RuntimeManagedRuleSite[]): RuntimeBackup {
+  const sites = ruleSites.map(({ hostname, paused, rules, hideRules }) => ({
     hostname,
     paused,
-    rules: rules.map(({ selector, name, paused, pathPrefix, maxClicks }) => ({ selector, name, paused, pathPrefix, maxClicks }))
+    rules: rules.map(({ selector, name, paused, pathPrefix, maxClicks }) => ({ selector, name, paused, pathPrefix, maxClicks })),
+    ...(hideRules.length ? { hideRules: hideRules.map(({ selector, name, paused, contains }) => ({
+      selector, name, paused, ...(contains ? { contains } : {})
+    })) } : {})
   }));
   return { format: RULE_BACKUP_FORMAT, version: 1, sites };
 }
@@ -202,13 +210,26 @@ function parseRuleBackup(input: unknown, isValidSelector: (selector: string) => 
   }
   const hosts = new Set();
   return backup.sites.map((site) => {
-    const { hostname, paused: sitePaused = false, rules } = recordValues(site);
+    const { hostname, paused: sitePaused = false, rules, hideRules = [] } = recordValues(site);
     if (typeof hostname !== "string" || !hostname || getSiteHostname(`https://${hostname}`) !== hostname ||
-        typeof sitePaused !== "boolean" || hosts.has(hostname) || !Array.isArray(rules)) {
+        typeof sitePaused !== "boolean" || hosts.has(hostname) || !Array.isArray(rules) || !Array.isArray(hideRules)) {
       throw new Error("Invalid site in rule backup");
     }
     hosts.add(hostname);
-    return { hostname, paused: sitePaused, rules: rules.map((rule) => {
+    const hidden = hideRules.map((rule) => {
+      const { selector, name = "", paused = false, contains } = recordValues(rule);
+      const { selector: markerSelector, text = "" } = recordValues(contains);
+      const draft = getHideRuleDraft({
+        selector, name, ...(contains !== undefined ? { contains: { selector: markerSelector, text } } : {})
+      });
+      if (!draft || typeof paused !== "boolean" || !isValidSelector(draft.selector) ||
+          (draft.contains && !isValidSelector(draft.contains.selector))) {
+        throw new Error("Invalid hide rule in backup");
+      }
+      return { ...draft, paused: sitePaused || paused };
+    });
+
+    return { hostname, paused: sitePaused, hideRules: hidden, rules: rules.map((rule) => {
       const { selector, name = "", paused = false, pathPrefix, maxClicks } = recordValues(rule);
       const execution = getExecutionOptions(pathPrefix, maxClicks);
       if (typeof selector !== "string" || !selector.trim() || !isValidSelector(selector) ||
@@ -233,6 +254,20 @@ function planRuleImport(stored: RuntimeStored, sites: RuntimeBackupSite[]): Runt
       selectors.add(rule.selector);
       added.push(rule);
     }
-    return { ...site, existing, added, duplicates: site.rules.length - added.length };
+    const existingHideRules = getSiteHideRules(stored, site.hostname);
+    const hideRules = site.hideRules ?? [];
+    const hideTargetKey = ({ selector, contains }: RuntimeHideDraft) =>
+      JSON.stringify([selector, contains?.selector, contains?.text]);
+    const hideTargets = new Set(existingHideRules.map(hideTargetKey));
+    const addedHideRules = hideRules.filter((rule) => {
+      const key = hideTargetKey(rule);
+      if (hideTargets.has(key)) return false;
+      hideTargets.add(key);
+      return true;
+    });
+    return {
+      ...site, existing, added, existingHideRules, addedHideRules,
+      duplicates: site.rules.length - added.length + hideRules.length - addedHideRules.length
+    };
   });
 }

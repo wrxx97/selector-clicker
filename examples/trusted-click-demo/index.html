@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Selector Clicker 点击测试</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font: 16px/1.55 system-ui, "Microsoft YaHei", sans-serif;
+      color: #18263f;
+      background: #eef3f9;
+      --border: #d6e1ee;
+      --muted: #4c5d75;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { width: min(720px, calc(100% - 32px)); margin: clamp(24px, 7vh, 72px) auto; }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.2; }
+    h2 { font-size: 1.05rem; }
+    header p { margin-top: 8px; color: var(--muted); }
+    button {
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+      color: inherit;
+      padding: 8px 14px;
+    }
+    button:hover { background: #edf5ff; }
+    button:focus-visible { outline: 3px solid #367be7; outline-offset: 3px; }
+    button:disabled { cursor: default; opacity: .55; }
+    button:disabled:hover { background: #fff; }
+    code { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+
+    .stage {
+      display: grid;
+      align-items: center;
+      min-height: clamp(156px, 29vw, 226px);
+      margin: 20px 0 14px;
+      padding: clamp(16px, 5vw, 28px);
+      border-radius: 16px;
+      background: #142746;
+      color: #fff;
+    }
+    .ad { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 18px; }
+    .ad p { color: #c5d5ed; margin-top: 5px; }
+    #skip-button { min-width: 108px; border-color: #bedcff; background: #d8eaff; color: #11396e; }
+    #skip-button:hover { background: #ecf5ff; }
+    #skip-button::before { content: "跳过 →"; }
+    [hidden] { display: none !important; }
+
+    .panel { border: 1px solid var(--border); border-radius: 16px; background: #fff; padding: 16px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    #status { padding: 9px 12px; border-radius: 8px; background: #edf3fb; }
+    #status[data-result="blocked"] { color: #8e2924; background: #fff0ee; }
+    #status[data-result="accepted"] { color: #125640; background: #e5f6ee; }
+    #events { margin: 12px 0 0; padding-left: 24px; overflow: auto; max-height: 11rem; }
+    #events li { margin: 5px 0; padding-left: 2px; }
+    #events:empty { display: none; }
+    .details { margin-block: 12px 0; color: var(--muted); font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>点击信任检查</h1>
+      <p>页面只接受 Chrome 标记为 <code>isTrusted: true</code> 的点击。</p>
+    </header>
+
+    <section class="stage" aria-label="测试区域">
+      <div class="ad" id="ad">
+        <div>
+          <h2>待跳过的测试内容</h2>
+          <p>「跳过」由 <code>#skip-button::before</code> 绘制。</p>
+        </div>
+        <button id="skip-button" type="button" aria-label="跳过"></button>
+      </div>
+      <p id="skipped" hidden>跳过成功。重置后可以再测一次。</p>
+    </section>
+
+    <section class="panel" aria-labelledby="result-title">
+      <h2 id="result-title">点击结果</h2>
+      <div class="toolbar">
+        <button id="script-click" type="button">用脚本调用 <code>.click()</code></button>
+        <button id="reset" type="button">重置测试</button>
+      </div>
+      <p id="status" role="status">等待点击</p>
+      <ol id="events" aria-label="事件记录"></ol>
+      <p class="details">插件规则可以直接使用 <code>#skip-button</code>。每次重置都会显示测试内容并清空记录。</p>
+    </section>
+  </main>
+
+  <script>
+    const ad = document.getElementById("ad");
+    const skipButton = document.getElementById("skip-button");
+    const skipped = document.getElementById("skipped");
+    const scriptClick = document.getElementById("script-click");
+    const status = document.getElementById("status");
+    const events = document.getElementById("events");
+
+    function reportClick(event, accepted) {
+      const result = accepted ? "已跳过" : "已拦截";
+      const message = "isTrusted: " + event.isTrusted + " · " + result;
+      status.textContent = message;
+      status.dataset.result = accepted ? "accepted" : "blocked";
+
+      const entry = document.createElement("li");
+      entry.textContent = event.type + " · " + message;
+      events.append(entry);
+    }
+
+    skipButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (event.isTrusted === false) {
+        reportClick(event, false);
+        return;
+      }
+
+      reportClick(event, true);
+      ad.hidden = true;
+      skipped.hidden = false;
+      scriptClick.disabled = true;
+    });
+
+    scriptClick.addEventListener("click", () => skipButton.click());
+
+    document.getElementById("reset").addEventListener("click", () => {
+      ad.hidden = false;
+      skipped.hidden = true;
+      scriptClick.disabled = false;
+      status.textContent = "等待点击";
+      delete status.dataset.result;
+      events.replaceChildren();
+    });
+  </script>
+</body>
+</html>

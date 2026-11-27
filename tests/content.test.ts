@@ -24,7 +24,7 @@ const scripts = ["site-rules.js", "picker.js", "content.js"] as const;
 const contentScript = scripts.map(compileRuntimeScript).join("\n");
 const siteKey = "siteSelectors:example.com";
 
-function createElement(options: Partial<ElementState> = {}, descendants: Record<string, object[]> = {}) {
+function createElement(options: Partial<ElementState> & { disabledAncestor?: boolean } = {}, descendants: Record<string, object[]> = {}) {
   const state = {
     clicks: 0,
     highlights: 0,
@@ -63,8 +63,17 @@ function createElement(options: Partial<ElementState> = {}, descendants: Record<
     matches(selector: string) {
       return selector.includes(":disabled") && state.disabled;
     },
+    closest(selector: string) {
+      return selector.includes(":disabled") && (state.disabled || options.disabledAncestor) ? this : null;
+    },
     getBoundingClientRect() {
       return { width: state.width, height: state.height };
+    },
+    getClientRects() {
+      return [{ left: 0, top: 0, right: state.width, bottom: state.height }];
+    },
+    contains(node: unknown) {
+      return node === this;
     },
     click() {
       state.clicks += 1;
@@ -83,6 +92,7 @@ interface ContentFixture {
   url?: string;
   authorized?: boolean;
   reinject?: boolean;
+  browserClick?: { hit: ReturnType<typeof createElement>; success: boolean };
   now?: () => number;
 }
 
@@ -93,6 +103,7 @@ async function startContentScript({
   url = "https://example.com/",
   authorized = true,
   reinject = false,
+  browserClick,
   now = Date.now
 }: ContentFixture) {
   const runtimeListeners: RuntimeListener[] = [];
@@ -123,7 +134,10 @@ async function startContentScript({
   }
 
   const document = {
-    documentElement: {},
+    documentElement: { clientWidth: 800, clientHeight: 600 },
+    visibilityState: "visible",
+    addEventListener() {},
+    elementFromPoint: () => browserClick?.hit ?? null,
     querySelectorAll(selector: string) {
       if (invalidSelectors.includes(selector)) {
         throw new Error(`Invalid selector: ${selector}`);
@@ -159,7 +173,9 @@ async function startContentScript({
       runtime: {
         sendMessage(message: typeof messages[number]) {
           messages.push(message);
+          return Promise.resolve(message.type === "browser-click" ? { ok: browserClick?.success } : undefined);
         },
+        getManifest: () => ({ permissions: browserClick ? ["debugger"] : [] }),
         onMessage: {
           addListener(listener: RuntimeListener) {
             runtimeListeners.push(listener);
@@ -171,7 +187,7 @@ async function startContentScript({
           get() {
             const address = new URL(url);
             const patterns = authorized ? [`${address.protocol}//${address.hostname}/*`] : [];
-            return Promise.resolve({ authorizedSitePatterns: patterns });
+            return Promise.resolve({ authorizedSitePatterns: patterns, experimentalBrowserClick: Boolean(browserClick) });
           }
         },
         sync: {
@@ -228,6 +244,31 @@ function toPlainObject(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
+test("experimental mode counts only successful browser clicks and never falls back to script", async () => {
+  const target = createElement();
+  const browserClick = { hit: target, success: false };
+  let time = 10_000;
+  const app = await startContentScript({
+    config: { enabled: true, [siteKey]: [".ad-close"], cooldown: 1000 },
+    elementsBySelector: { ".ad-close": [target] },
+    browserClick,
+    now: () => time
+  });
+
+  assert.deepEqual(app.messages.map(({ type }) => type), ["browser-click"]);
+  assert.equal(target.state.clicks, 0);
+  assert.equal(sendMessage(app.runtimeListeners[0], { type: "get-status" }).totalClicks, 0);
+
+  time += 1000;
+  browserClick.success = true;
+  app.observer.notify("attributes");
+  app.runScheduledScans();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(app.messages.map(({ type }) => type), ["browser-click", "browser-click", "click-record"]);
+  assert.equal(sendMessage(app.runtimeListeners[0], { type: "get-status" }).totalClicks, 1);
+  assert.equal(target.state.clicks, 0);
+});
+
 test("clicks visible matching elements after the configuration loads", async () => {
   const closeButton = createElement();
   const app = await startContentScript({
@@ -265,6 +306,20 @@ test("clicks a unique real button within a matched wrapper and waits for the but
   assert.equal(button.state.clicks, 1);
   assert.equal(wrapper.state.clicks, 0);
   assert.equal(app.messages.filter((message) => message.type === "click-record").length, 1);
+});
+
+test("matches a child element without activating a disabled enclosing control", async () => {
+  const nested = createElement();
+  const blocked = createElement({ disabledAncestor: true });
+  const app = await startContentScript({
+    config: { enabled: true, [siteKey]: ["button > .label", "button > .blocked"] },
+    elementsBySelector: { "button > .label": [nested], "button > .blocked": [blocked] }
+  });
+  assert.equal(nested.state.clicks, 1);
+  assert.equal(blocked.state.clicks, 0);
+  assert.equal(sendMessage(app.runtimeListeners[0], {
+    type: "test-rule", hostname: "example.com", selector: "button > .blocked"
+  }).status, "disabled");
 });
 
 test("hides a single element and only the cards with the selected marker text, even with clicking off", async () => {

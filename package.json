@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite build --config src/build/vite.config.ts --watch",
     "build": "vite build --config src/build/vite.config.ts",
+    "build:experimental": "vite build --config src/build/vite.config.ts --mode experimental",
     "package": "node --import tsx src/build/package-chrome.ts",
     "test": "node --import tsx tests/run.ts",
     "i18n:check": "node --import tsx src/build/check-translations.ts",
